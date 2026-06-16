@@ -834,13 +834,14 @@ def interpolate_missing_frames(frame_data, start_frame, end_frame):
     return new_frame_data
 
 
-def calculate_cornerpin_data(tracker_data, start_frame, end_frame):
-    """Calculates the bounding box [x_min, y_min, x_max, y_max] of ALL landmarks
-    for each frame from start_frame to end_frame.
+def calculate_cornerpin_data(tracker_data, start_frame, end_frame, width=1920, height=1080):
+    """Calculates the 4 corner points [BL, BR, TR, TL] of the oriented bounding box of ALL landmarks
+    for each frame from start_frame to end_frame, taking face rotation into account.
     First interpolates all available landmarks to ensure continuity.
     Returns:
-        dict: mapping frame_number (int) -> [x_min, y_min, x_max, y_max]
+        dict: mapping frame_number (int) -> [[bl_x, bl_y], [br_x, br_y], [tr_x, tr_y], [tl_x, tl_y]]
     """
+    import math
     interpolated_tracks = {}
     for name, data in tracker_data.items():
         if not data:
@@ -856,22 +857,76 @@ def calculate_cornerpin_data(tracker_data, start_frame, end_frame):
     bbox_per_frame = {}
     for frame in range(start_frame, end_frame + 1):
         f_str = str(frame)
-        xs = []
-        ys = []
+        pts = []
         for name, data in interpolated_tracks.items():
             val = data.get(f_str)
             if val:
                 if isinstance(val[0], list):
                     for pt in val:
-                        xs.append(pt[0])
-                        ys.append(pt[1])
+                        pts.append(pt)
                 else:
-                    xs.append(val[0])
-                    ys.append(val[1])
-        if xs and ys:
-            bbox_per_frame[frame] = [min(xs), min(ys), max(xs), max(ys)]
+                    pts.append(val)
+                    
+        if pts:
+            # Calculate rotation angle based on eye line orientation
+            theta = 0.0
+            right_inner = interpolated_tracks.get("Right_Eye_Inner", {}).get(f_str)
+            right_outer = interpolated_tracks.get("Right_Eye_Outer", {}).get(f_str)
+            left_inner = interpolated_tracks.get("Left_Eye_Inner", {}).get(f_str)
+            left_outer = interpolated_tracks.get("Left_Eye_Outer", {}).get(f_str)
+            
+            if right_inner and right_outer and left_inner and left_outer:
+                right_eye = [(right_inner[0] + right_outer[0]) / 2.0, (right_inner[1] + right_outer[1]) / 2.0]
+                left_eye = [(left_inner[0] + left_outer[0]) / 2.0, (left_inner[1] + left_outer[1]) / 2.0]
+                dx = left_eye[0] - right_eye[0]
+                dy = left_eye[1] - right_eye[1]
+                theta = math.atan2(dy, dx)
+                
+            # Compute center of the face
+            cx = sum(p[0] for p in pts) / len(pts)
+            cy = sum(p[1] for p in pts) / len(pts)
+            
+            # Rotate all points around center by -theta to align face horizontally
+            cos_t = math.cos(-theta)
+            sin_t = math.sin(-theta)
+            rotated_pts = []
+            for x, y in pts:
+                dx = x - cx
+                dy = y - cy
+                rx = cx + dx * cos_t - dy * sin_t
+                ry = cy + dx * sin_t + dy * cos_t
+                rotated_pts.append([rx, ry])
+                
+            # Find AABB in rotated space
+            r_xs = [p[0] for p in rotated_pts]
+            r_ys = [p[1] for p in rotated_pts]
+            x_min_rot = min(r_xs)
+            y_min_rot = min(r_ys)
+            x_max_rot = max(r_xs)
+            y_max_rot = max(r_ys)
+            
+            # Define corners in rotated space: BL, BR, TR, TL
+            corners_rot = [
+                [x_min_rot, y_min_rot],
+                [x_max_rot, y_min_rot],
+                [x_max_rot, y_max_rot],
+                [x_min_rot, y_max_rot]
+            ]
+            
+            # Rotate corners back to image space by +theta
+            cos_back = math.cos(theta)
+            sin_back = math.sin(theta)
+            corners_orig = []
+            for rx, ry in corners_rot:
+                dx = rx - cx
+                dy = ry - cy
+                ox = cx + dx * cos_back - dy * sin_back
+                oy = cy + dx * sin_back + dy * cos_back
+                corners_orig.append([round(ox, 3), round(oy, 3)])
+                
+            bbox_per_frame[frame] = corners_orig
         else:
-            bbox_per_frame[frame] = [0, 0, 1920, 1080]
+            bbox_per_frame[frame] = [[0, 0], [width, 0], [width, height], [0, height]]
             
     return bbox_per_frame
 
@@ -898,12 +953,12 @@ def generate_cornerpin_node(parent_node, json_path, width, height):
         end_frame = 100
         ref_frame = 1
 
-    # Calculate corner pin data per frame
-    bbox_per_frame = calculate_cornerpin_data(tracker_data, start_frame, end_frame)
+    # Calculate corner pin data per frame (returns BL, BR, TR, TL points per frame)
+    bbox_per_frame = calculate_cornerpin_data(tracker_data, start_frame, end_frame, width, height)
 
     # Resolve bounding box on the reference frame (clamped to available range)
     ref_clamped = max(start_frame, min(end_frame, ref_frame))
-    ref_bbox = bbox_per_frame.get(ref_clamped, [0, 0, width, height])
+    ref_bbox = bbox_per_frame.get(ref_clamped, [[0, 0], [width, 0], [width, height], [0, height]])
     
     # Deselect all nodes to cleanly connect the new CornerPin2D node
     for n in nuke.allNodes():
@@ -918,29 +973,29 @@ def generate_cornerpin_node(parent_node, json_path, width, height):
     cornerpin.setName(f"CornerPin_Face_{parent_node.name()}")
 
     # Set 'to' knobs (constant, represent coordinates at reference frame)
-    cornerpin['to1'].setValue([ref_bbox[0], ref_bbox[1]]) # BL
-    cornerpin['to2'].setValue([ref_bbox[2], ref_bbox[1]]) # BR
-    cornerpin['to3'].setValue([ref_bbox[2], ref_bbox[3]]) # TR
-    cornerpin['to4'].setValue([ref_bbox[0], ref_bbox[3]]) # TL
+    cornerpin['to1'].setValue(ref_bbox[0]) # BL
+    cornerpin['to2'].setValue(ref_bbox[1]) # BR
+    cornerpin['to3'].setValue(ref_bbox[2]) # TR
+    cornerpin['to4'].setValue(ref_bbox[3]) # TL
 
     # Enable animation on 'from' knobs
     for i in range(1, 5):
         cornerpin[f'from{i}'].setAnimated()
 
     # Populate keyframes on 'from' knobs for each frame
-    for frame, bbox in bbox_per_frame.items():
-        # bbox is [x_min, y_min, x_max, y_max]
-        cornerpin['from1'].setValueAt(bbox[0], frame, 0) # BL x
-        cornerpin['from1'].setValueAt(bbox[1], frame, 1) # BL y
+    for frame, corners in bbox_per_frame.items():
+        # corners is [BL, BR, TR, TL] where each is [x, y]
+        cornerpin['from1'].setValueAt(corners[0][0], frame, 0) # BL x
+        cornerpin['from1'].setValueAt(corners[0][1], frame, 1) # BL y
 
-        cornerpin['from2'].setValueAt(bbox[2], frame, 0) # BR x
-        cornerpin['from2'].setValueAt(bbox[1], frame, 1) # BR y
+        cornerpin['from2'].setValueAt(corners[1][0], frame, 0) # BR x
+        cornerpin['from2'].setValueAt(corners[1][1], frame, 1) # BR y
 
-        cornerpin['from3'].setValueAt(bbox[2], frame, 0) # TR x
-        cornerpin['from3'].setValueAt(bbox[3], frame, 1) # TR y
+        cornerpin['from3'].setValueAt(corners[2][0], frame, 0) # TR x
+        cornerpin['from3'].setValueAt(corners[2][1], frame, 1) # TR y
 
-        cornerpin['from4'].setValueAt(bbox[0], frame, 0) # TL x
-        cornerpin['from4'].setValueAt(bbox[3], frame, 1) # TL y
+        cornerpin['from4'].setValueAt(corners[3][0], frame, 0) # TL x
+        cornerpin['from4'].setValueAt(corners[3][1], frame, 1) # TL y
 
     # Set the label on CornerPin to remind the user of the reference frame
     cornerpin['label'].setValue(f"Ref Frame: {ref_frame}")
@@ -1013,7 +1068,7 @@ def generate_tracker_node(parent_node, json_path, width, height):
                     
     # Inject corner pin tracker points if requested
     if parent_node['export_cornerpin_tracker'].value():
-        bbox_per_frame = calculate_cornerpin_data(tracker_data, start_frame, end_frame)
+        bbox_per_frame = calculate_cornerpin_data(tracker_data, start_frame, end_frame, width, height)
         
         # Build 4 separate tracking datasets
         corner_bl = {}
@@ -1021,12 +1076,12 @@ def generate_tracker_node(parent_node, json_path, width, height):
         corner_tr = {}
         corner_tl = {}
         
-        for frame, bbox in bbox_per_frame.items():
+        for frame, corners in bbox_per_frame.items():
             f_str = str(frame)
-            corner_bl[f_str] = [bbox[0], bbox[1]] # [x_min, y_min]
-            corner_br[f_str] = [bbox[2], bbox[1]] # [x_max, y_min]
-            corner_tr[f_str] = [bbox[2], bbox[3]] # [x_max, y_max]
-            corner_tl[f_str] = [bbox[0], bbox[3]] # [x_min, y_max]
+            corner_bl[f_str] = corners[0] # BL [x, y]
+            corner_br[f_str] = corners[1] # BR [x, y]
+            corner_tr[f_str] = corners[2] # TR [x, y]
+            corner_tl[f_str] = corners[3] # TL [x, y]
             
         active_tracks["Corner_BL"] = corner_bl
         active_tracks["Corner_BR"] = corner_br
