@@ -555,8 +555,10 @@ def generate_roto_node(parent_node, json_path, width, height):
         
         # 1. Create the Shape object
         shape = rp.Shape(curves_knob)
+        shape_dir = dir(shape)
+        shape_type = str(type(shape))
+        raise AttributeError(f"TYPE: {shape_type} | ATTRIBUTES: {shape_dir}")
         shape.name = group_name
-        shape.open = False
         
         # 2. Add control points initialized at first frame coordinates
         for coords in first_points:
