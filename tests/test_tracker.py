@@ -25,6 +25,15 @@ class TestNukeFaceTracker(unittest.TestCase):
         self.assertEqual(res["Nose_Tip"], 4)
         self.assertEqual(res["Left_Eye_Outer"], 263)
 
+    def test_get_landmarks_by_names_mesh_and_contour(self):
+        """Test dynamic mesh and contour landmarks name resolution."""
+        names = ["Mesh_152", "Face_Oval_0", "Lips_Outer_1", "Invalid_Name", "Mesh_500", "Face_Oval_99"]
+        res = landmarks_config.get_landmarks_by_names(names)
+        self.assertEqual(len(res), 3)
+        self.assertEqual(res["Mesh_152"], 152)
+        self.assertEqual(res["Face_Oval_0"], 10) # 10 is index 0 in Face_Oval
+        self.assertEqual(res["Lips_Outer_1"], 185) # 185 is index 1 in Lips_Outer
+
     def test_get_contour_groups_by_names_all(self):
         """Test retrieving all contour groups when no names are specified."""
         res = landmarks_config.get_contour_groups_by_names([])

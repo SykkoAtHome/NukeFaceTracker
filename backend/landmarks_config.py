@@ -69,7 +69,29 @@ def get_landmarks_by_names(names):
     """Returns a dictionary {name: index} for the given names (or all landmarks if names is empty)."""
     if not names:
         return ALL_LANDMARKS
-    return {name: ALL_LANDMARKS[name] for name in names if name in ALL_LANDMARKS}
+        
+    result = {}
+    for name in names:
+        if name in ALL_LANDMARKS:
+            result[name] = ALL_LANDMARKS[name]
+        elif name.startswith("Mesh_"):
+            try:
+                idx = int(name.split("_")[1])
+                if 0 <= idx < 468:
+                    result[name] = idx
+            except Exception:
+                pass
+        else:
+            # Check if it matches a contour-based tracker name, e.g., Face_Oval_5
+            for group_name, indices in CONTOUR_GROUPS.items():
+                if name.startswith(group_name + "_"):
+                    try:
+                        idx_in_group = int(name.replace(group_name + "_", ""))
+                        if 0 <= idx_in_group < len(indices):
+                            result[name] = indices[idx_in_group]
+                    except Exception:
+                        pass
+    return result
 
 def get_contour_groups_by_names(names):
     """Returns a dictionary {group_name: [indices]} for the given names (or all contour groups if names is empty)."""

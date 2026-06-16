@@ -109,6 +109,10 @@ def create_face_tracker_node():
     export_type_knob.setTooltip("Select whether to generate a keyframed Tracker4 node for standard point tracking, or a native Roto node with closed, animated Bezier mask splines.")
     node.addKnob(export_type_knob)
     
+    density_knob = nuke.Enumeration_Knob("landmark_density", "Landmark Density", ["Sparse (Standard - 29 pts)", "Dense (Contours - 128 pts)", "Full (Entire Mesh - 468 pts)"])
+    density_knob.setTooltip("Sparse: Tracks up to 29 standard facial features.\nDense: Tracks up to 128 sequential contour points.\nFull: Tracks the entire 468-point face mesh topology.")
+    node.addKnob(density_knob)
+    
     # Landmarks Section (Standard Trackers)
     node.addKnob(nuke.Text_Knob("divider_landmarks", "Select Landmarks to Track", ""))
     
@@ -153,26 +157,85 @@ def create_face_tracker_node():
         node.addKnob(r_knob)
         r_knob.setVisible(False)
         
+    info_full_mesh = nuke.Text_Knob("info_full_mesh", "", "<span style='color:#ffa500'><b>Warning:</b> Tracking all 468 landmarks will create 468 point tracks.<br>This may slow down Foundry Nuke's viewport and node properties panel.</span>")
+    node.addKnob(info_full_mesh)
+    info_full_mesh.setVisible(False)
+    
     # Dynamic visibility callback script set on the knobChanged callback
     knob_changed_script = (
         "n = nuke.thisNode()\n"
         "k = nuke.thisKnob()\n"
-        "if k.name() == 'export_type':\n"
-        "    is_roto = (k.value() == 'Roto Node (Masks)')\n"
-        "    n['divider_landmarks'].setVisible(not is_roto)\n"
-        "    n['track_nose'].setVisible(not is_roto)\n"
-        "    n['track_eyes'].setVisible(not is_roto)\n"
-        "    n['track_eyebrows'].setVisible(not is_roto)\n"
-        "    n['track_mouth'].setVisible(not is_roto)\n"
-        "    n['track_contour'].setVisible(not is_roto)\n"
-        "    n['divider_roto_landmarks'].setVisible(is_roto)\n"
-        "    n['roto_oval'].setVisible(is_roto)\n"
-        "    n['roto_lips_outer'].setVisible(is_roto)\n"
-        "    n['roto_lips_inner'].setVisible(is_roto)\n"
-        "    n['roto_left_eye'].setVisible(is_roto)\n"
-        "    n['roto_right_eye'].setVisible(is_roto)\n"
-        "    n['roto_left_eyebrow'].setVisible(is_roto)\n"
-        "    n['roto_right_eyebrow'].setVisible(is_roto)\n"
+        "if k.name() in ['export_type', 'landmark_density']:\n"
+        "    is_roto = (n['export_type'].value() == 'Roto Node (Masks)')\n"
+        "    n['landmark_density'].setVisible(not is_roto)\n"
+        "    if is_roto:\n"
+        "        n['divider_landmarks'].setVisible(False)\n"
+        "        n['track_nose'].setVisible(False)\n"
+        "        n['track_eyes'].setVisible(False)\n"
+        "        n['track_eyebrows'].setVisible(False)\n"
+        "        n['track_mouth'].setVisible(False)\n"
+        "        n['track_contour'].setVisible(False)\n"
+        "        n['divider_roto_landmarks'].setVisible(True)\n"
+        "        n['divider_roto_landmarks'].setValue('Select Contours for Roto Splines')\n"
+        "        n['roto_oval'].setVisible(True)\n"
+        "        n['roto_lips_outer'].setVisible(True)\n"
+        "        n['roto_lips_inner'].setVisible(True)\n"
+        "        n['roto_left_eye'].setVisible(True)\n"
+        "        n['roto_right_eye'].setVisible(True)\n"
+        "        n['roto_left_eyebrow'].setVisible(True)\n"
+        "        n['roto_right_eyebrow'].setVisible(True)\n"
+        "        n['info_full_mesh'].setVisible(False)\n"
+        "    else:\n"
+        "        density = n['landmark_density'].value()\n"
+        "        if 'Sparse' in density:\n"
+        "            n['divider_landmarks'].setVisible(True)\n"
+        "            n['track_nose'].setVisible(True)\n"
+        "            n['track_eyes'].setVisible(True)\n"
+        "            n['track_eyebrows'].setVisible(True)\n"
+        "            n['track_mouth'].setVisible(True)\n"
+        "            n['track_contour'].setVisible(True)\n"
+        "            n['divider_roto_landmarks'].setVisible(False)\n"
+        "            n['roto_oval'].setVisible(False)\n"
+        "            n['roto_lips_outer'].setVisible(False)\n"
+        "            n['roto_lips_inner'].setVisible(False)\n"
+        "            n['roto_left_eye'].setVisible(False)\n"
+        "            n['roto_right_eye'].setVisible(False)\n"
+        "            n['roto_left_eyebrow'].setVisible(False)\n"
+        "            n['roto_right_eyebrow'].setVisible(False)\n"
+        "            n['info_full_mesh'].setVisible(False)\n"
+        "        elif 'Dense' in density:\n"
+        "            n['divider_landmarks'].setVisible(False)\n"
+        "            n['track_nose'].setVisible(False)\n"
+        "            n['track_eyes'].setVisible(False)\n"
+        "            n['track_eyebrows'].setVisible(False)\n"
+        "            n['track_mouth'].setVisible(False)\n"
+        "            n['track_contour'].setVisible(False)\n"
+        "            n['divider_roto_landmarks'].setVisible(True)\n"
+        "            n['divider_roto_landmarks'].setValue('Select Contour Groups to Track')\n"
+        "            n['roto_oval'].setVisible(True)\n"
+        "            n['roto_lips_outer'].setVisible(True)\n"
+        "            n['roto_lips_inner'].setVisible(True)\n"
+        "            n['roto_left_eye'].setVisible(True)\n"
+        "            n['roto_right_eye'].setVisible(True)\n"
+        "            n['roto_left_eyebrow'].setVisible(True)\n"
+        "            n['roto_right_eyebrow'].setVisible(True)\n"
+        "            n['info_full_mesh'].setVisible(False)\n"
+        "        elif 'Full' in density:\n"
+        "            n['divider_landmarks'].setVisible(False)\n"
+        "            n['track_nose'].setVisible(False)\n"
+        "            n['track_eyes'].setVisible(False)\n"
+        "            n['track_eyebrows'].setVisible(False)\n"
+        "            n['track_mouth'].setVisible(False)\n"
+        "            n['track_contour'].setVisible(False)\n"
+        "            n['divider_roto_landmarks'].setVisible(False)\n"
+        "            n['roto_oval'].setVisible(False)\n"
+        "            n['roto_lips_outer'].setVisible(False)\n"
+        "            n['roto_lips_inner'].setVisible(False)\n"
+        "            n['roto_left_eye'].setVisible(False)\n"
+        "            n['roto_right_eye'].setVisible(False)\n"
+        "            n['roto_left_eyebrow'].setVisible(False)\n"
+        "            n['roto_right_eyebrow'].setVisible(False)\n"
+        "            n['info_full_mesh'].setVisible(True)\n"
     )
     node['knobChanged'].setValue(knob_changed_script)
     
@@ -258,16 +321,35 @@ def run_tracking_on_node(node):
         if node['roto_right_eyebrow'].value():
             selected_names.append("Right_Eyebrow")
     else:
-        if node['track_nose'].value():
-            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Nose"].keys())
-        if node['track_eyes'].value():
-            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyes"].keys())
-        if node['track_eyebrows'].value():
-            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyebrows"].keys())
-        if node['track_mouth'].value():
-            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Mouth"].keys())
-        if node['track_contour'].value():
-            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Face Shape"].keys())
+        density = node['landmark_density'].value()
+        if "Sparse" in density:
+            if node['track_nose'].value():
+                selected_names.extend(landmarks_config.LANDMARK_GROUPS["Nose"].keys())
+            if node['track_eyes'].value():
+                selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyes"].keys())
+            if node['track_eyebrows'].value():
+                selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyebrows"].keys())
+            if node['track_mouth'].value():
+                selected_names.extend(landmarks_config.LANDMARK_GROUPS["Mouth"].keys())
+            if node['track_contour'].value():
+                selected_names.extend(landmarks_config.LANDMARK_GROUPS["Face Shape"].keys())
+        elif "Dense" in density:
+            if node['roto_oval'].value():
+                selected_names.extend([f"Face_Oval_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Face_Oval"]))])
+            if node['roto_lips_outer'].value():
+                selected_names.extend([f"Lips_Outer_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Outer"]))])
+            if node['roto_lips_inner'].value():
+                selected_names.extend([f"Lips_Inner_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Inner"]))])
+            if node['roto_left_eye'].value():
+                selected_names.extend([f"Left_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eye"]))])
+            if node['roto_right_eye'].value():
+                selected_names.extend([f"Right_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eye"]))])
+            if node['roto_left_eyebrow'].value():
+                selected_names.extend([f"Left_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eyebrow"]))])
+            if node['roto_right_eyebrow'].value():
+                selected_names.extend([f"Right_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eyebrow"]))])
+        elif "Full" in density:
+            selected_names.extend([f"Mesh_{i}" for i in range(468)])
         
     landmarks_str = ",".join(selected_names)
     if not landmarks_str:
