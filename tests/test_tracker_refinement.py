@@ -170,6 +170,7 @@ class TestTrackerRefinement(unittest.TestCase):
                 'export_t': MagicMock(value=lambda: True),
                 'export_r': MagicMock(value=lambda: False),
                 'export_s': MagicMock(value=lambda: False),
+                'export_cornerpin_tracker': MagicMock(value=lambda: False),
             }
             mock_parent.__getitem__.side_effect = lambda key: knobs[key]
             

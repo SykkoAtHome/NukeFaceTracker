@@ -3,6 +3,8 @@ import sys
 import json
 import re
 import subprocess
+import tempfile
+import shutil
 import nuke
 
 # Add backend directory to sys.path to import landmarks config
@@ -147,7 +149,15 @@ def set_range_to_input(node):
     start = int(input_node.firstFrame())
     end = int(input_node.lastFrame())
     
-    # Handle default/invalid frame range by falling back to root settings
+    # If the frame range is default/invalid or single-frame, try to find an upstream Read node
+    # to get the true sequence range
+    if (start == end and start <= 1) or (start == 0 and end == 0):
+        read_node = find_upstream_read(input_node)
+        if read_node:
+            start = int(read_node.firstFrame())
+            end = int(read_node.lastFrame())
+            
+    # Fallback to root settings if still default/invalid
     if start == end and start == 0:
         start = int(nuke.root().firstFrame())
         end = int(nuke.root().lastFrame())
@@ -190,6 +200,11 @@ def create_face_tracker_node():
     if input_node:
         start_frame = int(input_node.firstFrame())
         end_frame = int(input_node.lastFrame())
+        if (start_frame == end_frame and start_frame <= 1) or (start_frame == 0 and end_frame == 0):
+            read_node = find_upstream_read(input_node)
+            if read_node:
+                start_frame = int(read_node.firstFrame())
+                end_frame = int(read_node.lastFrame())
         if start_frame == end_frame and start_frame == 0:
             start_frame = int(nuke.root().firstFrame())
             end_frame = int(nuke.root().lastFrame())
@@ -377,19 +392,15 @@ def create_face_tracker_node():
 
 
 def run_tracking_on_node(node):
-    """Reads options from the FaceTracker node, processes tracking,
-    and saves the keyframed data. Does not auto-generate nodes.
+    """Reads options from the FaceTracker node, processes tracking on a 
+    temporarily rendered JPEG stream of the exact input pixel flow (supporting
+    all upstream grades, warps, stabilization, and switch nodes), and saves 
+    the keyframed data.
     """
     # 1. Pipeline and Refinement Validation
     input_node = node.input(0)
     if not input_node:
-        nuke.message("Please connect the Face Tracker node to an input node (e.g. Read node) first.")
-        return False
-        
-    read_node = find_upstream_read(input_node)
-    if not read_node:
-        nuke.message("Could not find an upstream 'Read' node connected to this pipeline.\n"
-                     "Please make sure your footage flows from a valid 'Read' node.")
+        nuke.message("Please connect the Face Tracker node to an input node first.")
         return False
         
     refine_enabled = node['refine_smartvectors'].value()
@@ -407,16 +418,6 @@ def run_tracking_on_node(node):
             nuke.message("The connected SmartVector node does not contain any recognizable vector channels.\n"
                          "Expected layers like 'smartvector_fwd', 'smartvector', 'forward', or 'motion' containing .u/.v or .x/.y channels.")
             return False
-        
-    # Retrieve resolved filename pattern (evaluates relative paths and TCL but keeps frame patterns like #### or %04d)
-    try:
-        input_path = nuke.filename(read_node)
-    except Exception:
-        input_path = read_node['file'].value()
-        
-    if not input_path:
-        nuke.message("The upstream Read node does not contain a valid file path.")
-        return False
         
     # Retrieve parameters directly from custom knobs
     start_frame = int(node['start_frame'].value())
@@ -493,110 +494,154 @@ def run_tracking_on_node(node):
         nuke_fps = nuke.root().fps()
     except Exception:
         pass
-        
-    cmd = [
-        python_exe,
-        backend_script,
-        "--input", input_path,
-        "--output", output_json,
-        "--start", str(start_frame),
-        "--end", str(end_frame),
-        "--width", str(width),
-        "--height", str(height),
-        "--landmarks", landmarks_str,
-        "--export-type", "trackers",
-        "--mode", mode_val,
-        "--fps", str(nuke_fps),
-        "--min-det-confidence", str(min_det_conf),
-        "--min-track-confidence", str(min_track_conf)
-    ]
+
+    # 4. Set up temporary render directory for active image stream caching
+    temp_dir = tempfile.mkdtemp(prefix="nuke_facetracker_")
+    temp_file_pattern = os.path.join(temp_dir, "frame_%04d.jpg").replace("\\", "/")
     
-    # Hide console terminal window on Windows platforms
-    startupinfo = None
-    if sys.platform == "win32":
-        startupinfo = subprocess.STARTUPINFO()
-        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        startupinfo.wShowWindow = 0 # SW_HIDE
-        
-    # 4. Trigger Subprocess tracking with a native Nuke progress modal
+    # Trigger Subprocess tracking with a native Nuke progress modal
     task = nuke.ProgressTask("MediaPipe Face Tracker")
-    task.setMessage("Initializing face detection engine...")
+    task.setMessage("Rendering active image stream to temporary cache...")
+    
+    write_node = None
+    success = False
     
     try:
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True,
-            startupinfo=startupinfo,
-            bufsize=1
-        )
-    except Exception as e:
-        nuke.message(f"Failed to start backend subprocess:\n{str(e)}")
-        return False
+        # Create temporary Write node inside the Group context to render the active stream
+        with node:
+            internal_source = node.node("Source")
+            if not internal_source:
+                raise ValueError("Internal 'Source' input node not found within FaceTracker Group.")
+            
+            write_node = nuke.nodes.Write()
+            write_node.setInput(0, internal_source)
+            write_node['file'].setValue(temp_file_pattern)
+            write_node['file_type'].setValue('jpeg')
+            
+            # Set JPEG quality to high to preserve fine details for landmark detection
+            if 'quality' in write_node.knobs():
+                write_node['quality'].setValue(0.9)
+            elif '_jpeg_quality' in write_node.knobs():
+                write_node['_jpeg_quality'].setValue(0.9)
+                
+        # Synchronously execute the temporary render in Nuke
+        nuke.execute(write_node, start_frame, end_frame)
         
-    success = False
-    error_logs = []
-    
-    while True:
-        if task.isCancelled():
-            process.terminate()
-            nuke.message("Face tracking cancelled by user.")
-            return False
-            
-        line = process.stdout.readline()
-        if not line:
-            break
-            
-        line = line.strip()
-        print(f"[MediaPipe Backend] {line}")
+        # Setup subprocess command referencing the temporary JPEGs
+        cmd = [
+            python_exe,
+            backend_script,
+            "--input", temp_file_pattern,
+            "--output", output_json,
+            "--start", str(start_frame),
+            "--end", str(end_frame),
+            "--width", str(width),
+            "--height", str(height),
+            "--landmarks", landmarks_str,
+            "--export-type", "trackers",
+            "--mode", mode_val,
+            "--fps", str(nuke_fps),
+            "--min-det-confidence", str(min_det_conf),
+            "--min-track-confidence", str(min_track_conf)
+        ]
         
-        if "[ERROR]" in line or "Error:" in line or "Traceback" in line:
-            error_logs.append(line)
+        # Hide console terminal window on Windows platforms
+        startupinfo = None
+        if sys.platform == "win32":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0 # SW_HIDE
             
-        if line.startswith("PROGRESS:"):
-            match = re.search(r'PROGRESS:\s*(\d+)%', line)
-            if match:
-                progress_val = int(match.group(1))
-                if refine_enabled:
-                    mapped_progress = int(progress_val * 0.8)
-                else:
-                    mapped_progress = progress_val
-                task.setProgress(mapped_progress)
-                task.setMessage(f"Tracking face... frames {start_frame}-{end_frame} ({progress_val}%)")
-        elif line.startswith("[INFO]"):
-            task.setMessage(line)
-        elif line.startswith("[SUCCESS]"):
-            success = True
-            task.setMessage(line)
-            
-    process.wait()
-    
-    if process.returncode != 0 or not success:
-        err_msg = "\n".join(error_logs[-10:]) if error_logs else "Unknown error occurred in the background process."
-        nuke.message(f"Backend process failed (Exit Code: {process.returncode}):\n\n{err_msg}")
-        return False
+        task.setMessage("Initializing face detection engine...")
         
-    # 5. SmartVector refinement phase
-    if refine_enabled:
-        task.setMessage("Refining tracking coordinates with SmartVectors...")
         try:
-            with open(output_json, "r") as f:
-                tracker_data = json.load(f)
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                startupinfo=startupinfo,
+                bufsize=1
+            )
         except Exception as e:
-            nuke.message(f"Failed to read tracking JSON for refinement:\n{str(e)}")
+            nuke.message(f"Failed to start backend subprocess:\n{str(e)}")
             return False
             
-        success_refine = apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_channel, v_channel, task)
-        if not success_refine:
+        error_logs = []
+        
+        while True:
+            if task.isCancelled():
+                process.terminate()
+                nuke.message("Face tracking cancelled by user.")
+                return False
+                
+            line = process.stdout.readline()
+            if not line:
+                break
+                
+            line = line.strip()
+            print(f"[MediaPipe Backend] {line}")
+            
+            if "[ERROR]" in line or "Error:" in line or "Traceback" in line:
+                error_logs.append(line)
+                
+            if line.startswith("PROGRESS:"):
+                match = re.search(r'PROGRESS:\s*(\d+)%', line)
+                if match:
+                    progress_val = int(match.group(1))
+                    if refine_enabled:
+                        mapped_progress = int(progress_val * 0.8)
+                    else:
+                        mapped_progress = progress_val
+                    task.setProgress(mapped_progress)
+                    task.setMessage(f"Tracking face... frames {start_frame}-{end_frame} ({progress_val}%)")
+            elif line.startswith("[INFO]"):
+                task.setMessage(line)
+            elif line.startswith("[SUCCESS]"):
+                success = True
+                task.setMessage(line)
+                
+        process.wait()
+        
+        if process.returncode != 0 or not success:
+            err_msg = "\n".join(error_logs[-10:]) if error_logs else "Unknown error occurred in the background process."
+            nuke.message(f"Backend process failed (Exit Code: {process.returncode}):\n\n{err_msg}")
             return False
             
+        # 5. SmartVector refinement phase
+        if refine_enabled:
+            task.setMessage("Refining tracking coordinates with SmartVectors...")
+            try:
+                with open(output_json, "r") as f:
+                    tracker_data = json.load(f)
+            except Exception as e:
+                nuke.message(f"Failed to read tracking JSON for refinement:\n{str(e)}")
+                return False
+                
+            success_refine = apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_channel, v_channel, task)
+            if not success_refine:
+                return False
+                
+            try:
+                with open(output_json, "w") as f:
+                    json.dump(tracker_data, f, indent=2)
+            except Exception as e:
+                nuke.message(f"Failed to save refined JSON:\n{str(e)}")
+                return False
+                
+    finally:
+        # Cleanup temporary Write node inside the Group context
+        if write_node:
+            try:
+                with node:
+                    nuke.delete(write_node)
+            except Exception:
+                pass
+        # Cleanup temporary directory and cached JPEG files
         try:
-            with open(output_json, "w") as f:
-                json.dump(tracker_data, f, indent=2)
-        except Exception as e:
-            nuke.message(f"Failed to save refined JSON:\n{str(e)}")
-            return False
+            shutil.rmtree(temp_dir)
+        except Exception:
+            pass
             
     # 6. Success message - printed to the script editor to avoid blocking modal dialogs
     print("[NukeFaceTracker] Face tracking completed successfully! Switch to 'Tracker' or 'Roto' tab to export.")
