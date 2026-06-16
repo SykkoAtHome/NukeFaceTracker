@@ -201,8 +201,8 @@ class TestTrackerRefinement(unittest.TestCase):
             success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
             self.assertTrue(success)
             
-            # Case C: Full mode
-            set_knobs("Full", False, False, False, False, False)
+            # Case C: Full mode (now respects UI checkboxes per requirements)
+            set_knobs("Full", True, True, True, True, True)
             success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
             self.assertTrue(success)
 

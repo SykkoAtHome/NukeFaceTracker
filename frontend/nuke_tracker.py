@@ -265,18 +265,18 @@ def create_face_tracker_node():
     tracker_tab = nuke.Tab_Knob("tracker_tab", "Tracker")
     node.addKnob(tracker_tab)
     
-    density_knob = nuke.Enumeration_Knob("landmark_density", "Landmark Density", ["Sparse (Standard - 29 pts)", "Dense (Contours - 128 pts)", "Full (Entire Mesh - 468 pts)"])
-    density_knob.setTooltip("Sparse: Tracks up to 29 standard facial features.\nDense: Tracks up to 128 sequential contour points.\nFull: Tracks the entire 468-point face mesh topology.")
+    density_knob = nuke.Enumeration_Knob("landmark_density", "Landmark Density", ["Sparse (Standard - 31 pts)", "Dense (Contours - 149 pts)", "Full (Entire Mesh & Iris - 478 pts)"])
+    density_knob.setTooltip("Sparse: Tracks up to 31 standard facial features (includes Iris Centers).\nDense: Tracks up to 149 sequential contour points (includes Nose Bridge, Nostrils, and Irises).\nFull: Tracks high-fidelity mesh topology (up to 478 points).")
     node.addKnob(density_knob)
     
     divider_landmarks = nuke.Text_Knob("divider_landmarks", "Select Landmarks to Track", "")
     node.addKnob(divider_landmarks)
     
-    track_nose = nuke.Boolean_Knob("track_nose", "Nose (Tip, Bridge, Alar)", True)
-    track_eyes = nuke.Boolean_Knob("track_eyes", "Eyes (Corners, Eyelids)", True)
+    track_nose = nuke.Boolean_Knob("track_nose", "Nose (Tip, Bridge, Alar, Nostrils)", True)
+    track_eyes = nuke.Boolean_Knob("track_eyes", "Eyes & Iris (Corners, Eyelids, Iris Centers)", True)
     track_eyebrows = nuke.Boolean_Knob("track_eyebrows", "Eyebrows (Left & Right)", False)
     track_mouth = nuke.Boolean_Knob("track_mouth", "Mouth (Lip contours & Corners)", True)
-    track_contour = nuke.Boolean_Knob("track_contour", "Face Contour (Chin, Forehead, Cheeks)", True)
+    track_contour = nuke.Boolean_Knob("track_contour", "Face Contour (Oval, Chin, Forehead, Cheeks)", True)
     
     track_eyes.setFlag(nuke.STARTLINE)
     track_eyebrows.setFlag(nuke.STARTLINE)
@@ -289,7 +289,7 @@ def create_face_tracker_node():
     node.addKnob(track_mouth)
     node.addKnob(track_contour)
     
-    info_full_mesh = nuke.Text_Knob("info_full_mesh", "", "<span style='color:#ffa500'><b>Warning:</b> Tracking all 468 landmarks will create 468 point tracks.<br>This may slow down Foundry Nuke's viewport and node properties panel.</span>")
+    info_full_mesh = nuke.Text_Knob("info_full_mesh", "", "<span style='color:#ffa500'><b>Warning:</b> Tracking all 478 landmarks will create 478 point tracks.<br>This may slow down Foundry Nuke's viewport and node properties panel.</span>")
     node.addKnob(info_full_mesh)
     info_full_mesh.setVisible(False)
     
@@ -299,6 +299,7 @@ def create_face_tracker_node():
     export_s = nuke.Boolean_Knob("export_s", "S (Scale)", False)
     export_r.clearFlag(nuke.STARTLINE)
     export_s.clearFlag(nuke.STARTLINE)
+    
     node.addKnob(export_t)
     node.addKnob(export_r)
     node.addKnob(export_s)
@@ -322,25 +323,40 @@ def create_face_tracker_node():
     node.addKnob(divider_roto)
     
     roto_oval = nuke.Boolean_Knob("roto_oval", "Face Oval (36 pts)", True)
+    roto_nose_bridge = nuke.Boolean_Knob("roto_nose_bridge", "Nose Bridge (5 pts)", False)
+    roto_left_nostril = nuke.Boolean_Knob("roto_left_nostril", "Left Nostril (6 pts)", False)
+    roto_right_nostril = nuke.Boolean_Knob("roto_right_nostril", "Right Nostril (6 pts)", False)
     roto_lips_outer = nuke.Boolean_Knob("roto_lips_outer", "Lips Outer (20 pts)", True)
     roto_lips_inner = nuke.Boolean_Knob("roto_lips_inner", "Lips Inner (20 pts)", False)
     roto_left_eye = nuke.Boolean_Knob("roto_left_eye", "Left Eye (16 pts)", False)
     roto_right_eye = nuke.Boolean_Knob("roto_right_eye", "Right Eye (16 pts)", False)
+    roto_left_iris = nuke.Boolean_Knob("roto_left_iris", "Left Iris (4 pts)", False)
+    roto_right_iris = nuke.Boolean_Knob("roto_right_iris", "Right Iris (4 pts)", False)
     roto_left_eyebrow = nuke.Boolean_Knob("roto_left_eyebrow", "Left Eyebrow (10 pts)", False)
     roto_right_eyebrow = nuke.Boolean_Knob("roto_right_eyebrow", "Right Eyebrow (10 pts)", False)
     
+    roto_nose_bridge.setFlag(nuke.STARTLINE)
+    roto_left_nostril.setFlag(nuke.STARTLINE)
+    roto_right_nostril.setFlag(nuke.STARTLINE)
     roto_lips_outer.setFlag(nuke.STARTLINE)
     roto_lips_inner.setFlag(nuke.STARTLINE)
     roto_left_eye.setFlag(nuke.STARTLINE)
     roto_right_eye.setFlag(nuke.STARTLINE)
+    roto_left_iris.setFlag(nuke.STARTLINE)
+    roto_right_iris.setFlag(nuke.STARTLINE)
     roto_left_eyebrow.setFlag(nuke.STARTLINE)
     roto_right_eyebrow.setFlag(nuke.STARTLINE)
     
     node.addKnob(roto_oval)
+    node.addKnob(roto_nose_bridge)
+    node.addKnob(roto_left_nostril)
+    node.addKnob(roto_right_nostril)
     node.addKnob(roto_lips_outer)
     node.addKnob(roto_lips_inner)
     node.addKnob(roto_left_eye)
     node.addKnob(roto_right_eye)
+    node.addKnob(roto_left_iris)
+    node.addKnob(roto_right_iris)
     node.addKnob(roto_left_eyebrow)
     node.addKnob(roto_right_eyebrow)
     
@@ -447,7 +463,7 @@ def run_tracking_on_node(node):
         selected_names.extend([f"{group_name}_{i}" for i in range(len(pts))])
         
     # 3. All full mesh landmarks
-    selected_names.extend([f"Mesh_{i}" for i in range(468)])
+    selected_names.extend([f"Mesh_{i}" for i in range(478)])
     
     # 4. All Roto contour groups
     selected_names.extend(landmarks_config.CONTOUR_GROUPS.keys())
@@ -1116,35 +1132,21 @@ def generate_tracker_node(parent_node, json_path, width, height):
         
     # Resolve selected landmarks based on CURRENT options in the properties panel
     density = parent_node['landmark_density'].value()
-    selected_landmarks = []
     
-    if "Sparse" in density:
-        if parent_node['track_nose'].value():
-            selected_landmarks.extend(landmarks_config.LANDMARK_GROUPS["Nose"].keys())
-        if parent_node['track_eyes'].value():
-            selected_landmarks.extend(landmarks_config.LANDMARK_GROUPS["Eyes"].keys())
-        if parent_node['track_eyebrows'].value():
-            selected_landmarks.extend(landmarks_config.LANDMARK_GROUPS["Eyebrows"].keys())
-        if parent_node['track_mouth'].value():
-            selected_landmarks.extend(landmarks_config.LANDMARK_GROUPS["Mouth"].keys())
-        if parent_node['track_contour'].value():
-            selected_landmarks.extend(landmarks_config.LANDMARK_GROUPS["Face Shape"].keys())
-    elif "Dense" in density:
-        if parent_node['track_nose'].value():
-            selected_landmarks.extend(landmarks_config.LANDMARK_GROUPS["Nose"].keys())
-        if parent_node['track_eyes'].value():
-            selected_landmarks.extend([f"Left_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eye"]))])
-            selected_landmarks.extend([f"Right_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eye"]))])
-        if parent_node['track_eyebrows'].value():
-            selected_landmarks.extend([f"Left_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eyebrow"]))])
-            selected_landmarks.extend([f"Right_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eyebrow"]))])
-        if parent_node['track_mouth'].value():
-            selected_landmarks.extend([f"Lips_Outer_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Outer"]))])
-            selected_landmarks.extend([f"Lips_Inner_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Inner"]))])
-        if parent_node['track_contour'].value():
-            selected_landmarks.extend([f"Face_Oval_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Face_Oval"]))])
-    elif "Full" in density:
-        selected_landmarks.extend([f"Mesh_{i}" for i in range(468)])
+    active_parts = []
+    if parent_node['track_nose'].value():
+        active_parts.append("Nose")
+    if parent_node['track_eyes'].value():
+        active_parts.append("Eyes")
+    if parent_node['track_eyebrows'].value():
+        active_parts.append("Eyebrows")
+    if parent_node['track_mouth'].value():
+        active_parts.append("Mouth")
+    if parent_node['track_contour'].value():
+        active_parts.append("Face Shape")
+        
+    resolved_landmarks = landmarks_config.get_landmarks_for_density(density, active_parts)
+    selected_landmarks = list(resolved_landmarks.keys())
 
     try:
         start_frame = int(parent_node['start_frame'].value())
@@ -1314,6 +1316,16 @@ def generate_roto_node(parent_node, json_path, width, height):
         selected_contours.append("Left_Eyebrow")
     if parent_node['roto_right_eyebrow'].value():
         selected_contours.append("Right_Eyebrow")
+    if parent_node['roto_left_iris'].value():
+        selected_contours.append("Left_Iris")
+    if parent_node['roto_right_iris'].value():
+        selected_contours.append("Right_Iris")
+    if parent_node['roto_nose_bridge'].value():
+        selected_contours.append("Nose_Bridge")
+    if parent_node['roto_left_nostril'].value():
+        selected_contours.append("Nose_Left_Nostril")
+    if parent_node['roto_right_nostril'].value():
+        selected_contours.append("Nose_Right_Nostril")
 
     try:
         start_frame = int(parent_node['start_frame'].value())
