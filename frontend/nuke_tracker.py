@@ -531,10 +531,8 @@ def run_tracking_on_node(node):
             nuke.message(f"Failed to save refined JSON:\n{str(e)}")
             return False
             
-    # 6. Success message - wait for user to generate node on their tab of interest
-    nuke.message("Face tracking completed successfully!\n\n"
-                 "You can now switch to the 'Tracker' or 'Roto' tab "
-                 "and click 'Export Tracker' or 'Export Roto' to generate your nodes.")
+    # 6. Success message - printed to the script editor to avoid blocking modal dialogs
+    print("[NukeFaceTracker] Face tracking completed successfully! Switch to 'Tracker' or 'Roto' tab to export.")
     return True
 
 
