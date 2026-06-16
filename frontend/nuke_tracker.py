@@ -248,6 +248,11 @@ def create_face_tracker_node():
     node.addKnob(export_r)
     node.addKnob(export_s)
     
+    export_cornerpin_tracker = nuke.Boolean_Knob("export_cornerpin_tracker", "Corner Pin", False)
+    export_cornerpin_tracker.setTooltip("Export 4 calculated corner pin tracking points (Corner_BL, Corner_BR, Corner_TR, Corner_TL) defining the facial bounding box.")
+    export_cornerpin_tracker.setFlag(nuke.STARTLINE)
+    node.addKnob(export_cornerpin_tracker)
+    
     node.addKnob(nuke.Text_Knob("divider_tracker_action", "", ""))
     
     create_tracker_btn = nuke.PyScript_Knob("create_tracker_btn", "Export Tracker", "import nuke_tracker; nuke_tracker.generate_tracker_node_from_panel(nuke.thisNode())")
@@ -289,6 +294,25 @@ def create_face_tracker_node():
     create_roto_btn = nuke.PyScript_Knob("create_roto_btn", "Export Roto", "import nuke_tracker; nuke_tracker.generate_roto_node_from_panel(nuke.thisNode())")
     create_roto_btn.setFlag(nuke.STARTLINE)
     node.addKnob(create_roto_btn)
+    
+    # 4. CornerPin Node Generation Tab
+    cornerpin_tab = nuke.Tab_Knob("cornerpin_tab", "CornerPin")
+    node.addKnob(cornerpin_tab)
+    
+    node.addKnob(nuke.Text_Knob("divider_cornerpin", "CornerPin Export Settings", ""))
+    
+    ref_frame_knob = nuke.Int_Knob("ref_frame", "Reference Frame")
+    ref_frame_knob.setValue(int(nuke.frame()))
+    node.addKnob(ref_frame_knob)
+    
+    current_frame_btn = nuke.PyScript_Knob("set_ref_current", "Current Frame", "import nuke_tracker; nuke_tracker.set_ref_frame_to_current(nuke.thisNode())")
+    node.addKnob(current_frame_btn)
+    
+    node.addKnob(nuke.Text_Knob("divider_cornerpin_action", "", ""))
+    
+    create_cornerpin_btn = nuke.PyScript_Knob("create_cornerpin_btn", "Export CornerPin", "import nuke_tracker; nuke_tracker.generate_cornerpin_node_from_panel(nuke.thisNode())")
+    create_cornerpin_btn.setFlag(nuke.STARTLINE)
+    node.addKnob(create_cornerpin_btn)
     
     # Dynamic visibility callback script set on the knobChanged callback
     knob_changed_script = (
@@ -810,6 +834,122 @@ def interpolate_missing_frames(frame_data, start_frame, end_frame):
     return new_frame_data
 
 
+def calculate_cornerpin_data(tracker_data, start_frame, end_frame):
+    """Calculates the bounding box [x_min, y_min, x_max, y_max] of ALL landmarks
+    for each frame from start_frame to end_frame.
+    First interpolates all available landmarks to ensure continuity.
+    Returns:
+        dict: mapping frame_number (int) -> [x_min, y_min, x_max, y_max]
+    """
+    interpolated_tracks = {}
+    for name, data in tracker_data.items():
+        if not data:
+            continue
+        first_val = list(data.values())[0]
+        if isinstance(first_val[0], list):
+            # Contour group
+            interpolated_tracks[name] = interpolate_missing_frames(data, start_frame, end_frame)
+        else:
+            # Single landmark
+            interpolated_tracks[name] = interpolate_missing_frames(data, start_frame, end_frame)
+
+    bbox_per_frame = {}
+    for frame in range(start_frame, end_frame + 1):
+        f_str = str(frame)
+        xs = []
+        ys = []
+        for name, data in interpolated_tracks.items():
+            val = data.get(f_str)
+            if val:
+                if isinstance(val[0], list):
+                    for pt in val:
+                        xs.append(pt[0])
+                        ys.append(pt[1])
+                else:
+                    xs.append(val[0])
+                    ys.append(val[1])
+        if xs and ys:
+            bbox_per_frame[frame] = [min(xs), min(ys), max(xs), max(ys)]
+        else:
+            bbox_per_frame[frame] = [0, 0, 1920, 1080]
+            
+    return bbox_per_frame
+
+
+def generate_cornerpin_node(parent_node, json_path, width, height):
+    """Loads JSON tracking results, calculates bounding boxes, and generates an animated CornerPin2D node."""
+    if not os.path.exists(json_path):
+        nuke.message(f"Output JSON file not found:\n{json_path}")
+        return False
+        
+    try:
+        with open(json_path, "r") as f:
+            tracker_data = json.load(f)
+    except Exception as e:
+        nuke.message(f"Failed to parse JSON file:\n{str(e)}")
+        return False
+
+    try:
+        start_frame = int(parent_node['start_frame'].value())
+        end_frame = int(parent_node['end_frame'].value())
+        ref_frame = int(parent_node['ref_frame'].value())
+    except Exception:
+        start_frame = 1
+        end_frame = 100
+        ref_frame = 1
+
+    # Calculate corner pin data per frame
+    bbox_per_frame = calculate_cornerpin_data(tracker_data, start_frame, end_frame)
+
+    # Resolve bounding box on the reference frame (clamped to available range)
+    ref_clamped = max(start_frame, min(end_frame, ref_frame))
+    ref_bbox = bbox_per_frame.get(ref_clamped, [0, 0, width, height])
+    
+    # Deselect all nodes to cleanly connect the new CornerPin2D node
+    for n in nuke.allNodes():
+        n.setSelected(False)
+        
+    parent_node.setSelected(True)
+    
+    # Create the CornerPin2D Node in the parent canvas context
+    parent_group = parent_node.parent()
+    with parent_group:
+        cornerpin = nuke.createNode('CornerPin2D')
+    cornerpin.setName(f"CornerPin_Face_{parent_node.name()}")
+
+    # Set 'to' knobs (constant, represent coordinates at reference frame)
+    cornerpin['to1'].setValue([ref_bbox[0], ref_bbox[1]]) # BL
+    cornerpin['to2'].setValue([ref_bbox[2], ref_bbox[1]]) # BR
+    cornerpin['to3'].setValue([ref_bbox[2], ref_bbox[3]]) # TR
+    cornerpin['to4'].setValue([ref_bbox[0], ref_bbox[3]]) # TL
+
+    # Enable animation on 'from' knobs
+    for i in range(1, 5):
+        cornerpin[f'from{i}'].setAnimated()
+
+    # Populate keyframes on 'from' knobs for each frame
+    for frame, bbox in bbox_per_frame.items():
+        # bbox is [x_min, y_min, x_max, y_max]
+        cornerpin['from1'].setValueAt(bbox[0], frame, 0) # BL x
+        cornerpin['from1'].setValueAt(bbox[1], frame, 1) # BL y
+
+        cornerpin['from2'].setValueAt(bbox[2], frame, 0) # BR x
+        cornerpin['from2'].setValueAt(bbox[1], frame, 1) # BR y
+
+        cornerpin['from3'].setValueAt(bbox[2], frame, 0) # TR x
+        cornerpin['from3'].setValueAt(bbox[3], frame, 1) # TR y
+
+        cornerpin['from4'].setValueAt(bbox[0], frame, 0) # TL x
+        cornerpin['from4'].setValueAt(bbox[3], frame, 1) # TL y
+
+    # Set the label on CornerPin to remind the user of the reference frame
+    cornerpin['label'].setValue(f"Ref Frame: {ref_frame}")
+
+    parent_node.setSelected(True)
+    cornerpin.setSelected(True)
+    return True
+
+
 def generate_tracker_node(parent_node, json_path, width, height):
     """Loads JSON tracking results and serializes them into a keyframed Nuke Tracker4 node."""
     if not os.path.exists(json_path):
@@ -870,6 +1010,28 @@ def generate_tracker_node(parent_node, json_path, width, height):
                 interpolated_data = interpolate_missing_frames(data, start_frame, end_frame)
                 if interpolated_data:
                     active_tracks[name] = interpolated_data
+                    
+    # Inject corner pin tracker points if requested
+    if parent_node['export_cornerpin_tracker'].value():
+        bbox_per_frame = calculate_cornerpin_data(tracker_data, start_frame, end_frame)
+        
+        # Build 4 separate tracking datasets
+        corner_bl = {}
+        corner_br = {}
+        corner_tr = {}
+        corner_tl = {}
+        
+        for frame, bbox in bbox_per_frame.items():
+            f_str = str(frame)
+            corner_bl[f_str] = [bbox[0], bbox[1]] # [x_min, y_min]
+            corner_br[f_str] = [bbox[2], bbox[1]] # [x_max, y_min]
+            corner_tr[f_str] = [bbox[2], bbox[3]] # [x_max, y_max]
+            corner_tl[f_str] = [bbox[0], bbox[3]] # [x_min, y_max]
+            
+        active_tracks["Corner_BL"] = corner_bl
+        active_tracks["Corner_BR"] = corner_br
+        active_tracks["Corner_TR"] = corner_tr
+        active_tracks["Corner_TL"] = corner_tl
                 
     if not active_tracks:
         nuke.message("Please select at least one tracking landmark to export, or ensure you have tracked first.")
@@ -1139,4 +1301,32 @@ def generate_roto_node_from_panel(node):
         height = nuke.root().format().height()
         
     return generate_roto_node(node, json_path, width, height)
+
+
+def generate_cornerpin_node_from_panel(node):
+    """Callback triggered from the CornerPin tab. Loads JSON, calculates corner pin data and builds the CornerPin2D node."""
+    json_path = node['output_json'].value()
+    if not json_path:
+        nuke.message("Please specify a valid output JSON file path first.")
+        return False
+        
+    input_node = node.input(0)
+    if input_node:
+        try:
+            width = input_node.format().width()
+            height = input_node.format().height()
+        except Exception:
+            width = nuke.root().format().width()
+            height = nuke.root().format().height()
+    else:
+        width = nuke.root().format().width()
+        height = nuke.root().format().height()
+        
+    return generate_cornerpin_node(node, json_path, width, height)
+
+
+def set_ref_frame_to_current(node):
+    """Sets the 'ref_frame' knob to the current frame on the timeline."""
+    node['ref_frame'].setValue(int(nuke.frame()))
+
 
