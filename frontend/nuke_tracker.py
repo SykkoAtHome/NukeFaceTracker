@@ -118,7 +118,6 @@ def set_range_to_input(node):
 
 def create_face_tracker_node():
     """Factory function that spawns the FaceTracker custom node on the canvas,
-
     populating it with all standard tracking knobs.
     """
     # Create Group Node which serves as pass-through
@@ -139,9 +138,9 @@ def create_face_tracker_node():
         output = nuke.createNode('Output', inpanel=False)
         output.setInput(0, input_source)
     
-    # Create the Custom Properties tab
-    tab_knob = nuke.Tab_Knob("face_tracker_tab", "Face Tracker")
-    node.addKnob(tab_knob)
+    # 1. Tracking Settings Tab
+    tracking_tab = nuke.Tab_Knob("tracking_tab", "Tracking")
+    node.addKnob(tracking_tab)
     
     # Resolve initial ranges based on selected nodes or project
     start_frame = 1
@@ -178,15 +177,8 @@ def create_face_tracker_node():
     quality_knob.setTooltip("Higher quality levels increase the confidence thresholds to prevent tracking drift or false detections.")
     node.addKnob(quality_knob)
     
-    export_type_knob = nuke.Enumeration_Knob("export_type", "Export Type", ["Tracker4 Node", "Roto Node (Masks)"])
-    export_type_knob.setTooltip("Select whether to generate a keyframed Tracker4 node for standard point tracking, or a native Roto node with closed, animated Bezier mask splines.")
-    node.addKnob(export_type_knob)
-    
-    density_knob = nuke.Enumeration_Knob("landmark_density", "Landmark Density", ["Sparse (Standard - 29 pts)", "Dense (Contours - 128 pts)", "Full (Entire Mesh - 468 pts)"])
-    density_knob.setTooltip("Sparse: Tracks up to 29 standard facial features.\nDense: Tracks up to 128 sequential contour points.\nFull: Tracks the entire 468-point face mesh topology.")
-    node.addKnob(density_knob)
-    
     # Refinement Section
+    node.addKnob(nuke.Text_Knob("divider_refine", "Refinement", ""))
     refine_knob = nuke.Boolean_Knob("refine_smartvectors", "Refine with SmartVectors", False)
     refine_knob.setTooltip("Enables high-precision local refinement of tracking coordinates using motion vectors from the 'SmartVector' input.")
     node.addKnob(refine_knob)
@@ -198,8 +190,32 @@ def create_face_tracker_node():
     node.addKnob(stiffness_knob)
     stiffness_knob.setVisible(False)
     
-    # Landmarks Section (Standard Trackers)
-    node.addKnob(nuke.Text_Knob("divider_landmarks", "Select Landmarks to Track", ""))
+    # Output File Section
+    node.addKnob(nuke.Text_Knob("divider_output", "Output Options", ""))
+    
+    # Construct path cleanly to use forward slashes
+    temp_json = os.path.join(plugin_dir, "temp_tracker_data.json").replace("\\", "/")
+    output_json_knob = nuke.File_Knob("output_json", "Output JSON File")
+    output_json_knob.setValue(temp_json)
+    node.addKnob(output_json_knob)
+    
+    node.addKnob(nuke.Text_Knob("divider_action", "", ""))
+    
+    # Main action button
+    track_btn = nuke.PyScript_Knob("track_btn", "<b>Track Face</b>", "import nuke_tracker; nuke_tracker.run_tracking_on_node(nuke.thisNode())")
+    track_btn.setFlag(nuke.STARTLINE)
+    node.addKnob(track_btn)
+    
+    # 2. Tracker Node Generation Tab
+    tracker_tab = nuke.Tab_Knob("tracker_tab", "Tracker")
+    node.addKnob(tracker_tab)
+    
+    density_knob = nuke.Enumeration_Knob("landmark_density", "Landmark Density", ["Sparse (Standard - 29 pts)", "Dense (Contours - 128 pts)", "Full (Entire Mesh - 468 pts)"])
+    density_knob.setTooltip("Sparse: Tracks up to 29 standard facial features.\nDense: Tracks up to 128 sequential contour points.\nFull: Tracks the entire 468-point face mesh topology.")
+    node.addKnob(density_knob)
+    
+    divider_landmarks = nuke.Text_Knob("divider_landmarks", "Select Landmarks to Track", "")
+    node.addKnob(divider_landmarks)
     
     track_nose = nuke.Boolean_Knob("track_nose", "Nose (Tip, Bridge, Alar)", True)
     track_eyes = nuke.Boolean_Knob("track_eyes", "Eyes (Corners, Eyelids)", True)
@@ -218,10 +234,26 @@ def create_face_tracker_node():
     node.addKnob(track_mouth)
     node.addKnob(track_contour)
     
-    # Landmarks Section (Roto Contours - Hidden by default)
-    divider_roto = nuke.Text_Knob("divider_roto_landmarks", "Select Contours to Track", "")
+    info_dense_tracker = nuke.Text_Knob("info_dense_tracker", "", "<span style='color:#ffa500'><b>Dense Tracking:</b> Individual point trackers will be created for the contour groups selected on the 'Roto' tab.</span>")
+    node.addKnob(info_dense_tracker)
+    info_dense_tracker.setVisible(False)
+    
+    info_full_mesh = nuke.Text_Knob("info_full_mesh", "", "<span style='color:#ffa500'><b>Warning:</b> Tracking all 468 landmarks will create 468 point tracks.<br>This may slow down Foundry Nuke's viewport and node properties panel.</span>")
+    node.addKnob(info_full_mesh)
+    info_full_mesh.setVisible(False)
+    
+    node.addKnob(nuke.Text_Knob("divider_tracker_action", "", ""))
+    
+    create_tracker_btn = nuke.PyScript_Knob("create_tracker_btn", "<b>Create Tracker Node</b>", "import nuke_tracker; nuke_tracker.generate_tracker_node_from_panel(nuke.thisNode())")
+    create_tracker_btn.setFlag(nuke.STARTLINE)
+    node.addKnob(create_tracker_btn)
+    
+    # 3. Roto Node Generation Tab
+    roto_tab = nuke.Tab_Knob("roto_tab", "Roto")
+    node.addKnob(roto_tab)
+    
+    divider_roto = nuke.Text_Knob("divider_roto_landmarks", "Select Contours for Roto Splines", "")
     node.addKnob(divider_roto)
-    divider_roto.setVisible(False)
     
     roto_oval = nuke.Boolean_Knob("roto_oval", "Face Oval (36 pts)", True)
     roto_lips_outer = nuke.Boolean_Knob("roto_lips_outer", "Lips Outer (20 pts)", True)
@@ -238,13 +270,19 @@ def create_face_tracker_node():
     roto_left_eyebrow.setFlag(nuke.STARTLINE)
     roto_right_eyebrow.setFlag(nuke.STARTLINE)
     
-    for r_knob in [roto_oval, roto_lips_outer, roto_lips_inner, roto_left_eye, roto_right_eye, roto_left_eyebrow, roto_right_eyebrow]:
-        node.addKnob(r_knob)
-        r_knob.setVisible(False)
-        
-    info_full_mesh = nuke.Text_Knob("info_full_mesh", "", "<span style='color:#ffa500'><b>Warning:</b> Tracking all 468 landmarks will create 468 point tracks.<br>This may slow down Foundry Nuke's viewport and node properties panel.</span>")
-    node.addKnob(info_full_mesh)
-    info_full_mesh.setVisible(False)
+    node.addKnob(roto_oval)
+    node.addKnob(roto_lips_outer)
+    node.addKnob(roto_lips_inner)
+    node.addKnob(roto_left_eye)
+    node.addKnob(roto_right_eye)
+    node.addKnob(roto_left_eyebrow)
+    node.addKnob(roto_right_eyebrow)
+    
+    node.addKnob(nuke.Text_Knob("divider_roto_action", "", ""))
+    
+    create_roto_btn = nuke.PyScript_Knob("create_roto_btn", "<b>Create Roto Node</b>", "import nuke_tracker; nuke_tracker.generate_roto_node_from_panel(nuke.thisNode())")
+    create_roto_btn.setFlag(nuke.STARTLINE)
+    node.addKnob(create_roto_btn)
     
     # Dynamic visibility callback script set on the knobChanged callback
     knob_changed_script = (
@@ -252,103 +290,28 @@ def create_face_tracker_node():
         "k = nuke.thisKnob()\n"
         "if k.name() == 'refine_smartvectors':\n"
         "    n['anchor_stiffness'].setVisible(k.value())\n"
-        "elif k.name() in ['export_type', 'landmark_density']:\n"
-        "    is_roto = (n['export_type'].value() == 'Roto Node (Masks)')\n"
-        "    n['landmark_density'].setVisible(not is_roto)\n"
-        "    if is_roto:\n"
-        "        n['divider_landmarks'].setVisible(False)\n"
-        "        n['track_nose'].setVisible(False)\n"
-        "        n['track_eyes'].setVisible(False)\n"
-        "        n['track_eyebrows'].setVisible(False)\n"
-        "        n['track_mouth'].setVisible(False)\n"
-        "        n['track_contour'].setVisible(False)\n"
-        "        n['divider_roto_landmarks'].setVisible(True)\n"
-        "        n['divider_roto_landmarks'].setValue('Select Contours for Roto Splines')\n"
-        "        n['roto_oval'].setVisible(True)\n"
-        "        n['roto_lips_outer'].setVisible(True)\n"
-        "        n['roto_lips_inner'].setVisible(True)\n"
-        "        n['roto_left_eye'].setVisible(True)\n"
-        "        n['roto_right_eye'].setVisible(True)\n"
-        "        n['roto_left_eyebrow'].setVisible(True)\n"
-        "        n['roto_right_eyebrow'].setVisible(True)\n"
-        "        n['info_full_mesh'].setVisible(False)\n"
-        "    else:\n"
-        "        density = n['landmark_density'].value()\n"
-        "        if 'Sparse' in density:\n"
-        "            n['divider_landmarks'].setVisible(True)\n"
-        "            n['track_nose'].setVisible(True)\n"
-        "            n['track_eyes'].setVisible(True)\n"
-        "            n['track_eyebrows'].setVisible(True)\n"
-        "            n['track_mouth'].setVisible(True)\n"
-        "            n['track_contour'].setVisible(True)\n"
-        "            n['divider_roto_landmarks'].setVisible(False)\n"
-        "            n['roto_oval'].setVisible(False)\n"
-        "            n['roto_lips_outer'].setVisible(False)\n"
-        "            n['roto_lips_inner'].setVisible(False)\n"
-        "            n['roto_left_eye'].setVisible(False)\n"
-        "            n['roto_right_eye'].setVisible(False)\n"
-        "            n['roto_left_eyebrow'].setVisible(False)\n"
-        "            n['roto_right_eyebrow'].setVisible(False)\n"
-        "            n['info_full_mesh'].setVisible(False)\n"
-        "        elif 'Dense' in density:\n"
-        "            n['divider_landmarks'].setVisible(False)\n"
-        "            n['track_nose'].setVisible(False)\n"
-        "            n['track_eyes'].setVisible(False)\n"
-        "            n['track_eyebrows'].setVisible(False)\n"
-        "            n['track_mouth'].setVisible(False)\n"
-        "            n['track_contour'].setVisible(False)\n"
-        "            n['divider_roto_landmarks'].setVisible(True)\n"
-        "            n['divider_roto_landmarks'].setValue('Select Contour Groups to Track')\n"
-        "            n['roto_oval'].setVisible(True)\n"
-        "            n['roto_lips_outer'].setVisible(True)\n"
-        "            n['roto_lips_inner'].setVisible(True)\n"
-        "            n['roto_left_eye'].setVisible(True)\n"
-        "            n['roto_right_eye'].setVisible(True)\n"
-        "            n['roto_left_eyebrow'].setVisible(True)\n"
-        "            n['roto_right_eyebrow'].setVisible(True)\n"
-        "            n['info_full_mesh'].setVisible(False)\n"
-        "        elif 'Full' in density:\n"
-        "            n['divider_landmarks'].setVisible(False)\n"
-        "            n['track_nose'].setVisible(False)\n"
-        "            n['track_eyes'].setVisible(False)\n"
-        "            n['track_eyebrows'].setVisible(False)\n"
-        "            n['track_mouth'].setVisible(False)\n"
-        "            n['track_contour'].setVisible(False)\n"
-        "            n['divider_roto_landmarks'].setVisible(False)\n"
-        "            n['roto_oval'].setVisible(False)\n"
-        "            n['roto_lips_outer'].setVisible(False)\n"
-        "            n['roto_lips_inner'].setVisible(False)\n"
-        "            n['roto_left_eye'].setVisible(False)\n"
-        "            n['roto_right_eye'].setVisible(False)\n"
-        "            n['roto_left_eyebrow'].setVisible(False)\n"
-        "            n['roto_right_eyebrow'].setVisible(False)\n"
-        "            n['info_full_mesh'].setVisible(True)\n"
+        "elif k.name() == 'landmark_density':\n"
+        "    density = k.value()\n"
+        "    is_sparse = ('Sparse' in density)\n"
+        "    is_full = ('Full' in density)\n"
+        "    is_dense = ('Dense' in density)\n"
+        "    n['divider_landmarks'].setVisible(is_sparse)\n"
+        "    n['track_nose'].setVisible(is_sparse)\n"
+        "    n['track_eyes'].setVisible(is_sparse)\n"
+        "    n['track_eyebrows'].setVisible(is_sparse)\n"
+        "    n['track_mouth'].setVisible(is_sparse)\n"
+        "    n['track_contour'].setVisible(is_sparse)\n"
+        "    n['info_dense_tracker'].setVisible(is_dense)\n"
+        "    n['info_full_mesh'].setVisible(is_full)\n"
     )
     node['knobChanged'].setValue(knob_changed_script)
-    
-    # Output File Section
-    node.addKnob(nuke.Text_Knob("divider_output", "Output Options", ""))
-    
-    # Construct path cleanly to use forward slashes
-    temp_json = os.path.join(plugin_dir, "temp_tracker_data.json").replace("\\", "/")
-    output_json_knob = nuke.File_Knob("output_json", "Output JSON File")
-    output_json_knob.setValue(temp_json)
-    node.addKnob(output_json_knob)
-    
-    node.addKnob(nuke.Text_Knob("divider_action", "", ""))
-    
-    # Main action button
-    track_btn = nuke.PyScript_Knob("track_btn", "<b>Track Face</b>", "import nuke_tracker; nuke_tracker.run_tracking_on_node(nuke.thisNode())")
-    track_btn.setFlag(nuke.STARTLINE)
-    node.addKnob(track_btn)
     
     return node
 
 
 def run_tracking_on_node(node):
     """Reads options from the FaceTracker node, processes tracking,
-
-    and generates the keyframed Tracker4 node.
+    and saves the keyframed data. Does not auto-generate nodes.
     """
     # 1. Pipeline and Refinement Validation
     input_node = node.input(0)
@@ -400,60 +363,62 @@ def run_tracking_on_node(node):
         nuke.message("Please specify a valid path for the output JSON file.")
         return False
         
-    # Resolve selected landmarks or contours based on export type
+    # Resolve selected landmarks and contours across both tabs
     if not landmarks_config:
         nuke.message("Landmarks configuration could not be imported. Please verify backend/landmarks_config.py.")
         return False
         
-    is_roto_mode = (node['export_type'].value() == "Roto Node (Masks)")
-    
     selected_names = []
-    if is_roto_mode:
+    
+    # 1. From Tracker Tab (based on density selection)
+    density = node['landmark_density'].value()
+    if "Sparse" in density:
+        if node['track_nose'].value():
+            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Nose"].keys())
+        if node['track_eyes'].value():
+            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyes"].keys())
+        if node['track_eyebrows'].value():
+            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyebrows"].keys())
+        if node['track_mouth'].value():
+            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Mouth"].keys())
+        if node['track_contour'].value():
+            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Face Shape"].keys())
+    elif "Dense" in density:
         if node['roto_oval'].value():
-            selected_names.append("Face_Oval")
+            selected_names.extend([f"Face_Oval_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Face_Oval"]))])
         if node['roto_lips_outer'].value():
-            selected_names.append("Lips_Outer")
+            selected_names.extend([f"Lips_Outer_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Outer"]))])
         if node['roto_lips_inner'].value():
-            selected_names.append("Lips_Inner")
+            selected_names.extend([f"Lips_Inner_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Inner"]))])
         if node['roto_left_eye'].value():
-            selected_names.append("Left_Eye")
+            selected_names.extend([f"Left_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eye"]))])
         if node['roto_right_eye'].value():
-            selected_names.append("Right_Eye")
+            selected_names.extend([f"Right_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eye"]))])
         if node['roto_left_eyebrow'].value():
-            selected_names.append("Left_Eyebrow")
+            selected_names.extend([f"Left_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eyebrow"]))])
         if node['roto_right_eyebrow'].value():
-            selected_names.append("Right_Eyebrow")
-    else:
-        density = node['landmark_density'].value()
-        if "Sparse" in density:
-            if node['track_nose'].value():
-                selected_names.extend(landmarks_config.LANDMARK_GROUPS["Nose"].keys())
-            if node['track_eyes'].value():
-                selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyes"].keys())
-            if node['track_eyebrows'].value():
-                selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyebrows"].keys())
-            if node['track_mouth'].value():
-                selected_names.extend(landmarks_config.LANDMARK_GROUPS["Mouth"].keys())
-            if node['track_contour'].value():
-                selected_names.extend(landmarks_config.LANDMARK_GROUPS["Face Shape"].keys())
-        elif "Dense" in density:
-            if node['roto_oval'].value():
-                selected_names.extend([f"Face_Oval_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Face_Oval"]))])
-            if node['roto_lips_outer'].value():
-                selected_names.extend([f"Lips_Outer_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Outer"]))])
-            if node['roto_lips_inner'].value():
-                selected_names.extend([f"Lips_Inner_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Inner"]))])
-            if node['roto_left_eye'].value():
-                selected_names.extend([f"Left_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eye"]))])
-            if node['roto_right_eye'].value():
-                selected_names.extend([f"Right_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eye"]))])
-            if node['roto_left_eyebrow'].value():
-                selected_names.extend([f"Left_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eyebrow"]))])
-            if node['roto_right_eyebrow'].value():
-                selected_names.extend([f"Right_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eyebrow"]))])
-        elif "Full" in density:
-            selected_names.extend([f"Mesh_{i}" for i in range(468)])
+            selected_names.extend([f"Right_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eyebrow"]))])
+    elif "Full" in density:
+        selected_names.extend([f"Mesh_{i}" for i in range(468)])
         
+    # 2. From Roto Tab
+    if node['roto_oval'].value():
+        selected_names.append("Face_Oval")
+    if node['roto_lips_outer'].value():
+        selected_names.append("Lips_Outer")
+    if node['roto_lips_inner'].value():
+        selected_names.append("Lips_Inner")
+    if node['roto_left_eye'].value():
+        selected_names.append("Left_Eye")
+    if node['roto_right_eye'].value():
+        selected_names.append("Right_Eye")
+    if node['roto_left_eyebrow'].value():
+        selected_names.append("Left_Eyebrow")
+    if node['roto_right_eyebrow'].value():
+        selected_names.append("Right_Eyebrow")
+        
+    # Filter unique list
+    selected_names = list(set(selected_names))
     landmarks_str = ",".join(selected_names)
     if not landmarks_str:
         nuke.message("Please select at least one landmark or contour group to track!")
@@ -505,7 +470,7 @@ def run_tracking_on_node(node):
         "--width", str(width),
         "--height", str(height),
         "--landmarks", landmarks_str,
-        "--export-type", "roto" if is_roto_mode else "trackers",
+        "--export-type", "trackers",
         "--mode", mode_val,
         "--fps", str(nuke_fps),
         "--min-det-confidence", str(min_det_conf),
@@ -599,11 +564,11 @@ def run_tracking_on_node(node):
             nuke.message(f"Failed to save refined JSON:\n{str(e)}")
             return False
             
-    # 6. Populate and connect standard Tracker4 node or Roto node
-    if is_roto_mode:
-        return generate_roto_node(node, output_json, width, height)
-    else:
-        return generate_tracker_node(node, output_json, width, height)
+    # 6. Success message - wait for user to generate node on their tab of interest
+    nuke.message("Face tracking completed successfully!\n\n"
+                 "You can now switch to the 'Tracker' or 'Roto' tab "
+                 "and click 'Create Tracker Node' or 'Create Roto Node' to generate your nodes.")
+    return True
 
 
 def get_landmarks_bbox(tracker_data, frame, width, height, padding=50):
@@ -834,7 +799,13 @@ def generate_tracker_node(parent_node, json_path, width, height):
         nuke.message(f"Failed to parse JSON file:\n{str(e)}")
         return False
         
-    active_tracks = {name: data for name, data in tracker_data.items() if data}
+    active_tracks = {}
+    for name, data in tracker_data.items():
+        if data:
+            first_val = list(data.values())[0]
+            if isinstance(first_val[0], (int, float)):
+                active_tracks[name] = data
+                
     if not active_tracks:
         nuke.message("Face detected but failed to track any landmarks in the specified frame range.")
         return False
@@ -945,7 +916,13 @@ def generate_roto_node(parent_node, json_path, width, height):
         nuke.message(f"Failed to parse JSON file:\n{str(e)}")
         return False
         
-    active_contours = {name: data for name, data in roto_data.items() if data}
+    active_contours = {}
+    for name, data in roto_data.items():
+        if data:
+            first_val = list(data.values())[0]
+            if isinstance(first_val[0], list):
+                active_contours[name] = data
+                
     if not active_contours:
         nuke.message("Face detected but failed to track any contours in the specified frame range.")
         return False
@@ -1023,3 +1000,48 @@ def generate_roto_node(parent_node, json_path, width, height):
     roto_node.setSelected(True)
     
     return True
+
+
+def generate_tracker_node_from_panel(node):
+    """Callback triggered from the Tracker tab. Loads JSON and builds the Tracker4 node."""
+    json_path = node['output_json'].value()
+    if not json_path:
+        nuke.message("Please specify a valid output JSON file path first.")
+        return False
+        
+    input_node = node.input(0)
+    if input_node:
+        try:
+            width = input_node.format().width()
+            height = input_node.format().height()
+        except Exception:
+            width = nuke.root().format().width()
+            height = nuke.root().format().height()
+    else:
+        width = nuke.root().format().width()
+        height = nuke.root().format().height()
+        
+    return generate_tracker_node(node, json_path, width, height)
+
+
+def generate_roto_node_from_panel(node):
+    """Callback triggered from the Roto tab. Loads JSON and builds the Roto node."""
+    json_path = node['output_json'].value()
+    if not json_path:
+        nuke.message("Please specify a valid output JSON file path first.")
+        return False
+        
+    input_node = node.input(0)
+    if input_node:
+        try:
+            width = input_node.format().width()
+            height = input_node.format().height()
+        except Exception:
+            width = nuke.root().format().width()
+            height = nuke.root().format().height()
+    else:
+        width = nuke.root().format().width()
+        height = nuke.root().format().height()
+        
+    return generate_roto_node(node, json_path, width, height)
+
