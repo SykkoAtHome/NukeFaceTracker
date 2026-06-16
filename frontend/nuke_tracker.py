@@ -375,10 +375,10 @@ def create_face_tracker_node():
     
     node.addKnob(nuke.Text_Knob("divider_roto_action", "", ""))
     
-    # Bezier Spline Toggle
-    roto_bezier = nuke.Boolean_Knob("roto_bezier", "Bezier Splines", True)
+    # Bezier Spline Toggle (Cusped Bezier)
+    roto_bezier = nuke.Boolean_Knob("roto_bezier", "Cusped Bezier", False)
     roto_bezier.setFlag(nuke.STARTLINE)
-    roto_bezier.setTooltip("If enabled, export Roto shapes as smooth Bezier curves instead of sharp linear polylines.")
+    roto_bezier.setTooltip("If enabled, export Roto shapes as sharp linear/cusped polylines instead of smooth Bezier curves.")
     node.addKnob(roto_bezier)
     
     create_roto_btn = nuke.PyScript_Knob("create_roto_btn", "Export Roto", "import nuke_tracker; nuke_tracker.generate_roto_node_from_panel(nuke.thisNode())")
@@ -1346,11 +1346,11 @@ def generate_roto_node(parent_node, json_path, width, height):
     if parent_node['roto_right_nostril'].value():
         selected_contours.append("Nose_Right_Nostril")
 
-    # Read Bezier preference
+    # Read Bezier preference (Cusped Bezier: checked = no bezier/linear; unchecked = bezier/smooth)
     try:
-        bezier_enabled = bool(parent_node['roto_bezier'].value())
+        bezier_enabled = not bool(parent_node['roto_bezier'].value())
     except Exception:
-        bezier_enabled = False
+        bezier_enabled = True
 
     try:
         start_frame = int(parent_node['start_frame'].value())

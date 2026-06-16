@@ -244,8 +244,8 @@ class TestTrackerRefinement(unittest.TestCase):
         self.assertEqual(res["4"], [[30.0, 40.0], [300.0, 400.0]])
         self.assertEqual(res["5"], [[30.0, 40.0], [300.0, 400.0]])
 
-    def test_generate_roto_node_bezier(self):
-        """Test Roto node generation with smooth Bezier tangents calculation enabled."""
+    def test_generate_roto_node_bezier_enabled(self):
+        """Test Roto node generation when 'roto_bezier' (Cusped Bezier) is False (unchecked = smooth Bezier enabled)."""
         import json
         
         # Mock parent_node with a side_dict for Roto knobs
@@ -266,14 +266,13 @@ class TestTrackerRefinement(unittest.TestCase):
             'roto_right_iris': MagicMock(value=lambda: False),
             'roto_left_eyebrow': MagicMock(value=lambda: False),
             'roto_right_eyebrow': MagicMock(value=lambda: False),
-            'roto_bezier': MagicMock(value=lambda: True),
+            'roto_bezier': MagicMock(value=lambda: False), # False = Unchecked = Smooth Bezier enabled
             'start_frame': MagicMock(value=lambda: 1),
             'end_frame': MagicMock(value=lambda: 1),
         }
         mock_parent.__getitem__.side_effect = lambda key: knobs[key]
         
         # Mock dummy roto JSON contour data
-        # Face_Oval has 3 points (so num_points > 2, which activates tangent calculations)
         dummy_roto_data = {
             "Face_Oval": {
                 "1": [[100.0, 200.0], [150.0, 250.0], [200.0, 220.0]]
@@ -324,6 +323,86 @@ class TestTrackerRefinement(unittest.TestCase):
             mock_center.getPositionAnimCurve.assert_called()
             mock_lt.getPositionAnimCurve.assert_called()
             mock_rt.getPositionAnimCurve.assert_called()
+
+    def test_generate_roto_node_bezier_disabled(self):
+        """Test Roto node generation when 'roto_bezier' (Cusped Bezier) is True (checked = smooth Bezier disabled/cusped)."""
+        import json
+        
+        # Mock parent_node with a side_dict for Roto knobs
+        mock_parent = MagicMock()
+        mock_parent.name.return_value = "FaceTrackerRoto"
+        mock_parent.parent.return_value = MagicMock()
+        
+        knobs = {
+            'roto_oval': MagicMock(value=lambda: True),
+            'roto_nose_bridge': MagicMock(value=lambda: False),
+            'roto_left_nostril': MagicMock(value=lambda: False),
+            'roto_right_nostril': MagicMock(value=lambda: False),
+            'roto_lips_outer': MagicMock(value=lambda: False),
+            'roto_lips_inner': MagicMock(value=lambda: False),
+            'roto_left_eye': MagicMock(value=lambda: False),
+            'roto_right_eye': MagicMock(value=lambda: False),
+            'roto_left_iris': MagicMock(value=lambda: False),
+            'roto_right_iris': MagicMock(value=lambda: False),
+            'roto_left_eyebrow': MagicMock(value=lambda: False),
+            'roto_right_eyebrow': MagicMock(value=lambda: False),
+            'roto_bezier': MagicMock(value=lambda: True), # True = Checked = Sharp/cusped (no Bezier tangents computed)
+            'start_frame': MagicMock(value=lambda: 1),
+            'end_frame': MagicMock(value=lambda: 1),
+        }
+        mock_parent.__getitem__.side_effect = lambda key: knobs[key]
+        
+        # Mock dummy roto JSON contour data
+        dummy_roto_data = {
+            "Face_Oval": {
+                "1": [[100.0, 200.0], [150.0, 250.0], [200.0, 220.0]]
+            }
+        }
+        
+        # Mock nuke.rotopaint
+        mock_rp = MagicMock()
+        sys.modules['nuke.rotopaint'] = mock_rp
+        mock_nuke.rotopaint = mock_rp
+        
+        # Setup shape control points mock
+        mock_center = MagicMock()
+        mock_lt = MagicMock()
+        mock_rt = MagicMock()
+        
+        def create_anim_control_point(x, y):
+            cp = MagicMock()
+            cp.center = mock_center
+            cp.leftTangent = mock_lt
+            cp.rightTangent = mock_rt
+            return cp
+            
+        mock_rp.AnimControlPoint.side_effect = create_anim_control_point
+        
+        appended_points = []
+        def shape_append(item):
+            appended_points.append(item)
+            
+        def shape_getitem(idx):
+            return appended_points[idx]
+            
+        mock_shape = MagicMock()
+        mock_shape.append.side_effect = shape_append
+        mock_shape.__getitem__.side_effect = shape_getitem
+        mock_rp.Shape.return_value = mock_shape
+        
+        mock_nuke.allNodes.return_value = []
+        mock_nuke.createNode.return_value = MagicMock()
+        
+        with patch("os.path.exists", return_value=True), \
+             patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(dummy_roto_data))):
+            
+            success = nuke_tracker.generate_roto_node(mock_parent, "dummy_roto.json", 1920, 1080)
+            self.assertTrue(success)
+            
+            # Verify that getPositionAnimCurve was called on center, but NOT on left/right tangents
+            mock_center.getPositionAnimCurve.assert_called()
+            mock_lt.getPositionAnimCurve.assert_not_called()
+            mock_rt.getPositionAnimCurve.assert_not_called()
 
 
 if __name__ == "__main__":
