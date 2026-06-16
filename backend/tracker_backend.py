@@ -41,6 +41,7 @@ def main():
     parser.add_argument("--width", type=int, help="Optional frame width (passed from Nuke)")
     parser.add_argument("--height", type=int, help="Optional frame height (passed from Nuke)")
     parser.add_argument("--landmarks", help="Comma-separated landmark names to track")
+    parser.add_argument("--export-type", default="trackers", choices=["trackers", "roto"], help="Export type: standard trackers or sequential roto splines")
     parser.add_argument("--mode", default="video", choices=["image", "video"], help="Tracking mode: image (frame-by-frame) or video (temporal tracking)")
     parser.add_argument("--fps", type=float, default=24.0, help="Framerate for temporal tracking (video mode)")
     parser.add_argument("--min-det-confidence", type=float, default=0.5, help="Minimum face detection confidence (0.0-1.0)")
@@ -48,13 +49,19 @@ def main():
     
     args = parser.parse_args()
     
-    # Resolve selected landmarks to track
-    selected_landmark_names = []
-    if args.landmarks:
-        selected_landmark_names = [name.strip() for name in args.landmarks.split(",") if name.strip()]
-        
-    landmarks_to_track = landmarks_config.get_landmarks_by_names(selected_landmark_names)
-    print(f"[INFO] Initializing tracking of {len(landmarks_to_track)} landmarks for frames {args.start}-{args.end}...")
+    # Resolve selected landmarks or contour groups to track
+    if args.export_type == "roto":
+        selected_contour_names = []
+        if args.landmarks:
+            selected_contour_names = [name.strip() for name in args.landmarks.split(",") if name.strip()]
+        contours_to_track = landmarks_config.get_contour_groups_by_names(selected_contour_names)
+        print(f"[INFO] Initializing roto tracking of {len(contours_to_track)} contour groups for frames {args.start}-{args.end}...")
+    else:
+        selected_landmark_names = []
+        if args.landmarks:
+            selected_landmark_names = [name.strip() for name in args.landmarks.split(",") if name.strip()]
+        landmarks_to_track = landmarks_config.get_landmarks_by_names(selected_landmark_names)
+        print(f"[INFO] Initializing tracking of {len(landmarks_to_track)} landmarks for frames {args.start}-{args.end}...")
     
     # Locate face_landmarker.task model file
     model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "face_landmarker.task")
@@ -86,8 +93,10 @@ def main():
         sys.exit(1)
         
     # Prepare results storage structure
-    # Format: { "Point_Name": { "frame_num": [x, y] } }
-    results_data = {name: {} for name in landmarks_to_track.keys()}
+    if args.export_type == "roto":
+        results_data = {group_name: {} for group_name in contours_to_track.keys()}
+    else:
+        results_data = {name: {} for name in landmarks_to_track.keys()}
     
     # Detect input type (video file vs image sequence)
     is_sequence = "%" in args.input or "#" in args.input or not any(args.input.lower().endswith(ext) for ext in [".mp4", ".mov", ".avi", ".mkv", ".m4v"])
@@ -168,19 +177,35 @@ def main():
         if detection_result.face_landmarks:
             landmarks = detection_result.face_landmarks[0]
             
-            # Fetch coordinates for each selected landmark
-            for name, l_idx in landmarks_to_track.items():
-                if l_idx < len(landmarks):
-                    lm = landmarks[l_idx]
-                    
-                    # Convert coordinates to Nuke space
-                    # MediaPipe: X: [0, 1] (left to right), Y: [0, 1] (top to bottom)
-                    # Nuke: X: pixels (left to right), Y: pixels (bottom to top)
-                    x_nuke = lm.x * width
-                    y_nuke = height - (lm.y * height)
-                    
-                    # Store as string keys for strict JSON compatibility
-                    results_data[name][str(frame_num)] = [round(x_nuke, 3), round(y_nuke, 3)]
+            if args.export_type == "roto":
+                # Fetch coordinates for each contour group sequentially
+                for group_name, indices in contours_to_track.items():
+                    points = []
+                    all_valid = True
+                    for l_idx in indices:
+                        if l_idx < len(landmarks):
+                            lm = landmarks[l_idx]
+                            x_nuke = lm.x * width
+                            y_nuke = height - (lm.y * height)
+                            points.append([round(x_nuke, 3), round(y_nuke, 3)])
+                        else:
+                            all_valid = False
+                    if all_valid and len(points) == len(indices):
+                        results_data[group_name][str(frame_num)] = points
+            else:
+                # Fetch coordinates for each selected landmark
+                for name, l_idx in landmarks_to_track.items():
+                    if l_idx < len(landmarks):
+                        lm = landmarks[l_idx]
+                        
+                        # Convert coordinates to Nuke space
+                        # MediaPipe: X: [0, 1] (left to right), Y: [0, 1] (top to bottom)
+                        # Nuke: X: pixels (left to right), Y: pixels (bottom to top)
+                        x_nuke = lm.x * width
+                        y_nuke = height - (lm.y * height)
+                        
+                        # Store as string keys for strict JSON compatibility
+                        results_data[name][str(frame_num)] = [round(x_nuke, 3), round(y_nuke, 3)]
                     
         # Output progress stream for Nuke parsing
         progress = int(((idx + 1) / total_frames) * 100)

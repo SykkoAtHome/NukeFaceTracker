@@ -105,7 +105,11 @@ def create_face_tracker_node():
     quality_knob.setTooltip("Higher quality levels increase the confidence thresholds to prevent tracking drift or false detections.")
     node.addKnob(quality_knob)
     
-    # Landmarks Section
+    export_type_knob = nuke.Enumeration_Knob("export_type", "Export Type", ["Tracker4 Node", "Roto Node (Masks)"])
+    export_type_knob.setTooltip("Select whether to generate a keyframed Tracker4 node for standard point tracking, or a native Roto node with closed, animated Bezier mask splines.")
+    node.addKnob(export_type_knob)
+    
+    # Landmarks Section (Standard Trackers)
     node.addKnob(nuke.Text_Knob("divider_landmarks", "Select Landmarks to Track", ""))
     
     track_nose = nuke.Boolean_Knob("track_nose", "Nose (Tip, Bridge, Alar)", True)
@@ -124,6 +128,53 @@ def create_face_tracker_node():
     node.addKnob(track_eyebrows)
     node.addKnob(track_mouth)
     node.addKnob(track_contour)
+    
+    # Landmarks Section (Roto Contours - Hidden by default)
+    divider_roto = nuke.Text_Knob("divider_roto_landmarks", "Select Contours to Track", "")
+    node.addKnob(divider_roto)
+    divider_roto.setVisible(False)
+    
+    roto_oval = nuke.Boolean_Knob("roto_oval", "Face Oval (36 pts)", True)
+    roto_lips_outer = nuke.Boolean_Knob("roto_lips_outer", "Lips Outer (20 pts)", True)
+    roto_lips_inner = nuke.Boolean_Knob("roto_lips_inner", "Lips Inner (20 pts)", False)
+    roto_left_eye = nuke.Boolean_Knob("roto_left_eye", "Left Eye (16 pts)", False)
+    roto_right_eye = nuke.Boolean_Knob("roto_right_eye", "Right Eye (16 pts)", False)
+    roto_left_eyebrow = nuke.Boolean_Knob("roto_left_eyebrow", "Left Eyebrow (10 pts)", False)
+    roto_right_eyebrow = nuke.Boolean_Knob("roto_right_eyebrow", "Right Eyebrow (10 pts)", False)
+    
+    roto_lips_outer.setFlag(nuke.STARTLINE)
+    roto_lips_inner.setFlag(nuke.STARTLINE)
+    roto_left_eye.setFlag(nuke.STARTLINE)
+    roto_right_eye.setFlag(nuke.STARTLINE)
+    roto_left_eyebrow.setFlag(nuke.STARTLINE)
+    roto_right_eyebrow.setFlag(nuke.STARTLINE)
+    
+    for r_knob in [roto_oval, roto_lips_outer, roto_lips_inner, roto_left_eye, roto_right_eye, roto_left_eyebrow, roto_right_eyebrow]:
+        node.addKnob(r_knob)
+        r_knob.setVisible(False)
+        
+    # Dynamic visibility callback script set on the knobChanged callback
+    knob_changed_script = (
+        "n = nuke.thisNode()\n"
+        "k = nuke.thisKnob()\n"
+        "if k.name() == 'export_type':\n"
+        "    is_roto = (k.value() == 'Roto Node (Masks)')\n"
+        "    n['divider_landmarks'].setVisible(not is_roto)\n"
+        "    n['track_nose'].setVisible(not is_roto)\n"
+        "    n['track_eyes'].setVisible(not is_roto)\n"
+        "    n['track_eyebrows'].setVisible(not is_roto)\n"
+        "    n['track_mouth'].setVisible(not is_roto)\n"
+        "    n['track_contour'].setVisible(not is_roto)\n"
+        "    n['divider_roto_landmarks'].setVisible(is_roto)\n"
+        "    n['roto_oval'].setVisible(is_roto)\n"
+        "    n['roto_lips_outer'].setVisible(is_roto)\n"
+        "    n['roto_lips_inner'].setVisible(is_roto)\n"
+        "    n['roto_left_eye'].setVisible(is_roto)\n"
+        "    n['roto_right_eye'].setVisible(is_roto)\n"
+        "    n['roto_left_eyebrow'].setVisible(is_roto)\n"
+        "    n['roto_right_eyebrow'].setVisible(is_roto)\n"
+    )
+    node['knobChanged'].setValue(knob_changed_script)
     
     # Output File Section
     node.addKnob(nuke.Text_Knob("divider_output", "Output Options", ""))
@@ -183,26 +234,44 @@ def run_tracking_on_node(node):
         nuke.message("Please specify a valid path for the output JSON file.")
         return False
         
-    # Resolve selected landmarks to track
+    # Resolve selected landmarks or contours based on export type
     if not landmarks_config:
         nuke.message("Landmarks configuration could not be imported. Please verify backend/landmarks_config.py.")
         return False
         
+    is_roto_mode = (node['export_type'].value() == "Roto Node (Masks)")
+    
     selected_names = []
-    if node['track_nose'].value():
-        selected_names.extend(landmarks_config.LANDMARK_GROUPS["Nose"].keys())
-    if node['track_eyes'].value():
-        selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyes"].keys())
-    if node['track_eyebrows'].value():
-        selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyebrows"].keys())
-    if node['track_mouth'].value():
-        selected_names.extend(landmarks_config.LANDMARK_GROUPS["Mouth"].keys())
-    if node['track_contour'].value():
-        selected_names.extend(landmarks_config.LANDMARK_GROUPS["Face Shape"].keys())
+    if is_roto_mode:
+        if node['roto_oval'].value():
+            selected_names.append("Face_Oval")
+        if node['roto_lips_outer'].value():
+            selected_names.append("Lips_Outer")
+        if node['roto_lips_inner'].value():
+            selected_names.append("Lips_Inner")
+        if node['roto_left_eye'].value():
+            selected_names.append("Left_Eye")
+        if node['roto_right_eye'].value():
+            selected_names.append("Right_Eye")
+        if node['roto_left_eyebrow'].value():
+            selected_names.append("Left_Eyebrow")
+        if node['roto_right_eyebrow'].value():
+            selected_names.append("Right_Eyebrow")
+    else:
+        if node['track_nose'].value():
+            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Nose"].keys())
+        if node['track_eyes'].value():
+            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyes"].keys())
+        if node['track_eyebrows'].value():
+            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyebrows"].keys())
+        if node['track_mouth'].value():
+            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Mouth"].keys())
+        if node['track_contour'].value():
+            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Face Shape"].keys())
         
     landmarks_str = ",".join(selected_names)
     if not landmarks_str:
-        nuke.message("Please select at least one landmark group to track!")
+        nuke.message("Please select at least one landmark or contour group to track!")
         return False
         
     # Determine immediate input dimensions for precise viewport scaling
@@ -251,6 +320,7 @@ def run_tracking_on_node(node):
         "--width", str(width),
         "--height", str(height),
         "--landmarks", landmarks_str,
+        "--export-type", "roto" if is_roto_mode else "trackers",
         "--mode", mode_val,
         "--fps", str(nuke_fps),
         "--min-det-confidence", str(min_det_conf),
@@ -319,8 +389,11 @@ def run_tracking_on_node(node):
         nuke.message(f"Backend process failed (Exit Code: {process.returncode}):\n\n{err_msg}")
         return False
         
-    # 5. Populate and connect standard Tracker4 node
-    return generate_tracker_node(node, output_json, width, height)
+    # 5. Populate and connect standard Tracker4 node or Roto node
+    if is_roto_mode:
+        return generate_roto_node(node, output_json, width, height)
+    else:
+        return generate_tracker_node(node, output_json, width, height)
 
 
 def generate_tracker_node(parent_node, json_path, width, height):
@@ -430,4 +503,88 @@ def generate_tracker_node(parent_node, json_path, width, height):
     tracker.setSelected(True)
     
     nuke.message(f"Success!\nGenerated Tracker4 node '{tracker.name()}' downstream from '{parent_node.name()}' with {len(active_tracks)} track points.")
+    return True
+
+
+def generate_roto_node(parent_node, json_path, width, height):
+    """Loads JSON contour tracking results and generates a native, animated closed Roto node."""
+    if not os.path.exists(json_path):
+        nuke.message(f"Output JSON file not found:\n{json_path}")
+        return False
+        
+    try:
+        with open(json_path, "r") as f:
+            roto_data = json.load(f)
+    except Exception as e:
+        nuke.message(f"Failed to parse JSON file:\n{str(e)}")
+        return False
+        
+    active_contours = {name: data for name, data in roto_data.items() if data}
+    if not active_contours:
+        nuke.message("Face detected but failed to track any contours in the specified frame range.")
+        return False
+        
+    try:
+        import nuke.rotopaint as rp
+    except ImportError:
+        nuke.message("Failed to import nuke.rotopaint. Cannot generate Roto node.")
+        return False
+        
+    # Deselect all nodes to cleanly connect the new Roto node to our custom node
+    for n in nuke.allNodes():
+        n.setSelected(False)
+        
+    parent_node.setSelected(True)
+    
+    # Create the Roto Node
+    roto_node = nuke.createNode('Roto')
+    roto_node.setName(f"Roto_Face_{parent_node.name()}")
+    
+    curves_knob = roto_node['curves']
+    root_layer = curves_knob.rootLayer
+    
+    # Process each active contour group
+    for group_name, frame_data in active_contours.items():
+        sorted_frames = sorted([int(f) for f in frame_data.keys()])
+        if not sorted_frames:
+            continue
+            
+        first_frame = sorted_frames[0]
+        first_points = frame_data[str(first_frame)]
+        num_points = len(first_points)
+        
+        # 1. Create the Shape object
+        shape = rp.Shape(curves_knob)
+        shape.name = group_name
+        shape.closed = True
+        
+        # 2. Add control points initialized at first frame coordinates
+        for coords in first_points:
+            cp = rp.AnimControlPoint(coords[0], coords[1])
+            shape.append(cp)
+            
+        # Add the shape to the root layer first so its curves are registered with the knob
+        root_layer.append(shape)
+        
+        # 3. Animate each control point over the available frames
+        for frame in sorted_frames:
+            points = frame_data[str(frame)]
+            if len(points) != num_points:
+                continue # Safety skip
+                
+            for idx, coords in enumerate(points):
+                shape_point = shape[idx]
+                anim_point = shape_point.center
+                
+                # Set coordinate keyframes using AnimCurve.addKey
+                anim_point.x.addKey(frame, coords[0])
+                anim_point.y.addKey(frame, coords[1])
+                
+    # Force Nuke to evaluate and refresh the curves in the viewer
+    curves_knob.changed()
+    
+    parent_node.setSelected(True)
+    roto_node.setSelected(True)
+    
+    nuke.message(f"Success!\nGenerated Roto node '{roto_node.name()}' downstream from '{parent_node.name()}' with {len(active_contours)} closed animated shapes.")
     return True
