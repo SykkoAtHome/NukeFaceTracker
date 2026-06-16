@@ -26,16 +26,16 @@ except ImportError:
 
 def find_upstream_read(node):
     """Recursively traverses upstream following the active image pipeline to find the
-    first node with a 'file' knob (e.g., Read, Write, DeepRead) to ensure we always 
+    first node with a 'file' knob (e.g., Read, Write, DeepRead) to ensure we always
     use the active image stream.
     """
     if not node:
         return None
-        
+
     # If the node has a 'file' knob, we've found our image source leaf
     if node.knob('file') is not None:
         return node
-        
+
     # Check for Switch/Dissolve nodes which select a specific active input
     if node.Class() in ('Switch', 'Dissolve') and node.knob('which') is not None:
         try:
@@ -48,7 +48,7 @@ def find_upstream_read(node):
                         return result
         except Exception as e:
             print("[FaceTracker] Warning evaluating switch node '{}': {}".format(node.name(), str(e)))
-            
+
     # For standard nodes, follow the primary input (input 0 / B-pipe in Nuke) first
     if node.inputs() > 0:
         primary_input = node.input(0)
@@ -56,7 +56,7 @@ def find_upstream_read(node):
             result = find_upstream_read(primary_input)
             if result:
                 return result
-                
+
         # If input 0 is not connected, check other inputs as fallback (e.g., Merge with only A connected)
         for i in range(1, node.inputs()):
             other_input = node.input(i)
@@ -64,7 +64,7 @@ def find_upstream_read(node):
                 result = find_upstream_read(other_input)
                 if result:
                     return result
-                    
+
     return None
 
 
@@ -72,7 +72,7 @@ def get_unique_output_json_path(node):
     """Ensures and returns a unique output JSON path for the given node to avoid file collisions."""
     # Check if we should write results to a custom file
     write_to_file = node['write_to_file'].value() if 'write_to_file' in node.knobs() else False
-    
+
     if not write_to_file:
         # Default to a safe, stable path inside Nuke's native temp directory
         try:
@@ -80,7 +80,7 @@ def get_unique_output_json_path(node):
         except Exception:
             temp_dir = tempfile.gettempdir()
         return os.path.join(temp_dir, f"facetracker_{node.name()}_data.json").replace("\\", "/")
-        
+
     current_val = node['output_json'].value()
     if not current_val or "temp_tracker_data" in current_val:
         directory = os.path.dirname(current_val) if current_val else plugin_dir
@@ -92,39 +92,39 @@ def get_unique_output_json_path(node):
 
 
 def find_vector_channels(node):
-    """Scans a node's channels to find the best horizontal (U/X) and vertical (V/Y) 
+    """Scans a node's channels to find the best horizontal (U/X) and vertical (V/Y)
     vector channel pair.
-    
+
     Prioritizes:
     1. Layers containing 'smartvector' (e.g. smartvector_fwd, smartvector) with .u/.v or .x/.y
     2. Layers containing 'forward' (e.g. forward) with .u/.v or .x/.y
     3. Layers containing 'motion' (e.g. motion) with .u/.v or .x/.y
     4. Any layer with .u/.v or .x/.y
-    
+
     Returns:
         (u_channel, v_channel) if found, otherwise (None, None)
     """
     if not node:
         return None, None
-        
+
     try:
         channels = node.channels()
     except Exception:
         return None, None
-    
+
     # Extract unique layer names
     layers = set()
     for ch in channels:
         if '.' in ch:
             layers.add(ch.split('.')[0])
-            
+
     # Define channel suffix pairs in order of preference
     suffix_pairs = [('.u', '.v'), ('.x', '.y')]
-    
+
     # We will score each layer to find the best match
     best_score = -1
     best_pair = (None, None)
-    
+
     for layer in layers:
         for suffix_u, suffix_v in suffix_pairs:
             ch_u = f"{layer}{suffix_u}"
@@ -146,11 +146,11 @@ def find_vector_channels(node):
                     score = 30
                 else:
                     score = 10
-                    
+
                 if score > best_score:
                     best_score = score
                     best_pair = (ch_u, ch_v)
-                    
+
     return best_pair
 
 
@@ -161,10 +161,10 @@ def set_range_to_input(node):
     if not input_node:
         nuke.message("No input node connected to this Face Tracker.\nPlease connect it to a Read node pipeline.")
         return
-        
+
     start = int(input_node.firstFrame())
     end = int(input_node.lastFrame())
-    
+
     # If the frame range is default/invalid or single-frame, try to find an upstream Read node
     # to get the true sequence range
     if (start == end and start <= 1) or (start == 0 and end == 0):
@@ -172,14 +172,61 @@ def set_range_to_input(node):
         if read_node:
             start = int(read_node.firstFrame())
             end = int(read_node.lastFrame())
-            
+
     # Fallback to root settings if still default/invalid
     if start == end and start == 0:
         start = int(nuke.root().firstFrame())
         end = int(nuke.root().lastFrame())
-        
+
     node['start_frame'].setValue(start)
     node['end_frame'].setValue(end)
+
+
+def get_active_tracker_parts(node):
+    active_parts = []
+    knob_to_part = (
+        ("track_nose", "Nose"),
+        ("track_eyes", "Eyes"),
+        ("track_eyebrows", "Eyebrows"),
+        ("track_mouth", "Mouth"),
+        ("track_contour", "Face Shape"),
+    )
+
+    for knob_name, part_name in knob_to_part:
+        try:
+            if node[knob_name].value():
+                active_parts.append(part_name)
+        except Exception:
+            pass
+
+    return active_parts
+
+
+def get_selected_roto_contours(node):
+    selected_contours = []
+    knob_to_contour = (
+        ("roto_oval", "Face_Oval"),
+        ("roto_lips_outer", "Lips_Outer"),
+        ("roto_lips_inner", "Lips_Inner"),
+        ("roto_left_eye", "Left_Eye"),
+        ("roto_right_eye", "Right_Eye"),
+        ("roto_left_eyebrow", "Left_Eyebrow"),
+        ("roto_right_eyebrow", "Right_Eyebrow"),
+        ("roto_left_iris", "Left_Iris"),
+        ("roto_right_iris", "Right_Iris"),
+        ("roto_nose_bridge", "Nose_Bridge_Contour"),
+        ("roto_left_nostril", "Nose_Left_Nostril"),
+        ("roto_right_nostril", "Nose_Right_Nostril"),
+    )
+
+    for knob_name, contour_name in knob_to_contour:
+        try:
+            if node[knob_name].value():
+                selected_contours.append(contour_name)
+        except Exception:
+            pass
+
+    return selected_contours
 
 
 def create_face_tracker_node():
@@ -189,29 +236,29 @@ def create_face_tracker_node():
     # Create Group Node which serves as pass-through
     node = nuke.createNode('Group')
     node.setName("FaceTracker", True)
-    
+
     # Give it a nice, distinctive orange/copper tile color for identification in DAG
     node['tile_color'].setValue(0xff8c00ff)
-    
+
     # Setup internal pipeline for the Group node
     with node:
         input_source = nuke.createNode('Input', inpanel=False)
         input_source.setName("Source")
-        
+
         input_vectors = nuke.createNode('Input', inpanel=False)
         input_vectors.setName("SmartVector")
-        
+
         output = nuke.createNode('Output', inpanel=False)
         output.setInput(0, input_source)
-    
+
     # 1. Tracking Settings Tab
     tracking_tab = nuke.Tab_Knob("tracking_tab", "Analyze Face")
     node.addKnob(tracking_tab)
-    
+
     # Resolve initial ranges based on selected nodes or project
     start_frame = 1
     end_frame = 100
-    
+
     input_node = node.input(0)
     if input_node:
         start_frame = int(input_node.firstFrame())
@@ -224,130 +271,130 @@ def create_face_tracker_node():
         if start_frame == end_frame and start_frame == 0:
             start_frame = int(nuke.root().firstFrame())
             end_frame = int(nuke.root().lastFrame())
-            
+
     # Frame Range Knobs
     start_knob = nuke.Int_Knob("start_frame", "Start Frame")
     start_knob.setValue(start_frame)
     node.addKnob(start_knob)
-    
+
     end_knob = nuke.Int_Knob("end_frame", "End Frame")
     end_knob.setValue(end_frame)
     node.addKnob(end_knob)
-    
+
     range_btn = nuke.PyScript_Knob("set_range", "Set to Input Range", "import nuke_tracker; nuke_tracker.set_range_to_input(nuke.thisNode())")
     node.addKnob(range_btn)
-    
+
     # Settings Section
     node.addKnob(nuke.Text_Knob("divider_settings", "Settings", ""))
-    
+
     mode_knob = nuke.Enumeration_Knob("mode", "Tracking Mode", ["Video (Smooth / Stabilized)", "Image (Frame-by-Frame)"])
     mode_knob.setTooltip("Video mode uses temporal tracking (Kalman filters) to eliminate frame-to-frame landmark jitter.\n\nImage mode runs raw face detection on each frame independently.")
     node.addKnob(mode_knob)
-    
+
     quality_knob = nuke.Enumeration_Knob("quality", "Tracking Quality", ["Standard", "High Quality", "Maximum"])
     quality_knob.setTooltip("Higher quality levels increase the confidence thresholds to prevent tracking drift or false detections.")
     node.addKnob(quality_knob)
-    
+
     # Refinement Section
     node.addKnob(nuke.Text_Knob("divider_refine", "Refinement", ""))
-    
+
     backtrack_knob = nuke.Boolean_Knob("backtrack", "Backtrack", False)
     backtrack_knob.setTooltip("Runs tracking in both forward and backward directions, averaging the detected coordinates. This also helps patch frames where tracking might have failed in one of the directions.")
     node.addKnob(backtrack_knob)
-    
+
     refine_knob = nuke.Boolean_Knob("refine_smartvectors", "Refine with SmartVectors", False)
     refine_knob.setTooltip("Enables high-precision local refinement of tracking coordinates using motion vectors from the 'SmartVector' input.")
     node.addKnob(refine_knob)
-    
+
     stiffness_knob = nuke.Double_Knob("anchor_stiffness", "Anchor Stiffness")
     stiffness_knob.setValue(0.1)
     stiffness_knob.setRange(0.01, 0.5)
     stiffness_knob.setTooltip("Controls the blend ratio between local motion tracking and global MediaPipe anchors on each frame.\nLower values (e.g. 0.05) lock tight to physical skin textures but may accumulate drift.\nHigher values (e.g. 0.25) snap strongly back to MediaPipe landmarks.")
     node.addKnob(stiffness_knob)
     stiffness_knob.setVisible(False)
-    
+
     # Output File Section
     node.addKnob(nuke.Text_Knob("divider_output", "Output Options", ""))
-    
+
     write_to_file_knob = nuke.Boolean_Knob("write_to_file", "Write Results to File", False)
     write_to_file_knob.setTooltip("If enabled, saves the final tracking JSON data to a custom path of your choice.\nOtherwise, the tracking data is saved in Nuke's temporary directory automatically.")
     node.addKnob(write_to_file_knob)
-    
+
     # Construct path cleanly to use forward slashes
     temp_json = os.path.join(plugin_dir, "temp_tracker_data.json").replace("\\", "/")
     output_json_knob = nuke.File_Knob("output_json", "Output JSON File")
     output_json_knob.setValue(temp_json)
     node.addKnob(output_json_knob)
     output_json_knob.setVisible(False)
-    
+
     node.addKnob(nuke.Text_Knob("divider_action", "", ""))
-    
+
     # Main action button
     track_btn = nuke.PyScript_Knob("track_btn", "Track Face", "import nuke_tracker; nuke_tracker.run_tracking_on_node(nuke.thisNode())")
     track_btn.setFlag(nuke.STARTLINE)
     node.addKnob(track_btn)
-    
+
     # 2. Tracker Node Generation Tab
     tracker_tab = nuke.Tab_Knob("tracker_tab", "Tracker")
     node.addKnob(tracker_tab)
-    
+
     density_knob = nuke.Enumeration_Knob("landmark_density", "Landmark Density", ["Sparse (Standard - 31 pts)", "Dense (Contours - 149 pts)", "Full (Entire Mesh & Iris - 478 pts)"])
     density_knob.setTooltip("Sparse: Tracks up to 31 standard facial features (includes Iris Centers).\nDense: Tracks up to 149 sequential contour points (includes Nose Bridge, Nostrils, and Irises).\nFull: Tracks high-fidelity mesh topology (up to 478 points).")
     node.addKnob(density_knob)
-    
+
     divider_landmarks = nuke.Text_Knob("divider_landmarks", "Select Landmarks to Track", "")
     node.addKnob(divider_landmarks)
-    
+
     track_nose = nuke.Boolean_Knob("track_nose", "Nose (Tip, Bridge, Alar, Nostrils)", True)
     track_eyes = nuke.Boolean_Knob("track_eyes", "Eyes & Iris (Corners, Eyelids, Iris Centers)", True)
     track_eyebrows = nuke.Boolean_Knob("track_eyebrows", "Eyebrows (Left & Right)", False)
     track_mouth = nuke.Boolean_Knob("track_mouth", "Mouth (Lip contours & Corners)", True)
     track_contour = nuke.Boolean_Knob("track_contour", "Face Contour (Oval, Chin, Forehead, Cheeks)", True)
-    
+
     track_eyes.setFlag(nuke.STARTLINE)
     track_eyebrows.setFlag(nuke.STARTLINE)
     track_mouth.setFlag(nuke.STARTLINE)
     track_contour.setFlag(nuke.STARTLINE)
-    
+
     node.addKnob(track_nose)
     node.addKnob(track_eyes)
     node.addKnob(track_eyebrows)
     node.addKnob(track_mouth)
     node.addKnob(track_contour)
-    
+
     info_full_mesh = nuke.Text_Knob("info_full_mesh", "", "<span style='color:#ffa500'><b>Warning:</b> Tracking all 478 landmarks will create 478 point tracks.<br>This may slow down Foundry Nuke's viewport and node properties panel.</span>")
     node.addKnob(info_full_mesh)
     info_full_mesh.setVisible(False)
-    
+
     node.addKnob(nuke.Text_Knob("divider_flags", "Export Transform Flags", ""))
     export_t = nuke.Boolean_Knob("export_t", "T (Translate)", True)
     export_r = nuke.Boolean_Knob("export_r", "R (Rotation)", False)
     export_s = nuke.Boolean_Knob("export_s", "S (Scale)", False)
     export_r.clearFlag(nuke.STARTLINE)
     export_s.clearFlag(nuke.STARTLINE)
-    
+
     node.addKnob(export_t)
     node.addKnob(export_r)
     node.addKnob(export_s)
-    
+
     export_cornerpin_tracker = nuke.Boolean_Knob("export_cornerpin_tracker", "Corner Pin", False)
     export_cornerpin_tracker.setTooltip("Export 4 calculated corner pin tracking points (Corner_BL, Corner_BR, Corner_TR, Corner_TL) defining the facial bounding box.")
     export_cornerpin_tracker.setFlag(nuke.STARTLINE)
     node.addKnob(export_cornerpin_tracker)
-    
+
     node.addKnob(nuke.Text_Knob("divider_tracker_action", "", ""))
-    
+
     create_tracker_btn = nuke.PyScript_Knob("create_tracker_btn", "Export Tracker", "import nuke_tracker; nuke_tracker.generate_tracker_node_from_panel(nuke.thisNode())")
     create_tracker_btn.setFlag(nuke.STARTLINE)
     node.addKnob(create_tracker_btn)
-    
+
     # 3. Roto Node Generation Tab
     roto_tab = nuke.Tab_Knob("roto_tab", "Roto")
     node.addKnob(roto_tab)
-    
+
     divider_roto = nuke.Text_Knob("divider_roto_landmarks", "Select Contours for Roto Splines", "")
     node.addKnob(divider_roto)
-    
+
     roto_oval = nuke.Boolean_Knob("roto_oval", "Face Oval (36 pts)       ", True)
     roto_nose_bridge = nuke.Boolean_Knob("roto_nose_bridge", "Nose Bridge (5 pts)", False)
     roto_left_nostril = nuke.Boolean_Knob("roto_left_nostril", "Left Nostril (6 pts)     ", False)
@@ -360,76 +407,76 @@ def create_face_tracker_node():
     roto_right_iris = nuke.Boolean_Knob("roto_right_iris", "Right Iris (4 pts)", False)
     roto_left_eyebrow = nuke.Boolean_Knob("roto_left_eyebrow", "Left Eyebrow (10 pts)   ", False)
     roto_right_eyebrow = nuke.Boolean_Knob("roto_right_eyebrow", "Right Eyebrow (10 pts)", False)
-    
+
     # Configure 2x6 grid layout (Column 1 starts line, Column 2 clears startline)
     roto_oval.setFlag(nuke.STARTLINE)
     roto_nose_bridge.clearFlag(nuke.STARTLINE)
-    
+
     roto_left_nostril.setFlag(nuke.STARTLINE)
     roto_right_nostril.clearFlag(nuke.STARTLINE)
-    
+
     roto_lips_outer.setFlag(nuke.STARTLINE)
     roto_lips_inner.clearFlag(nuke.STARTLINE)
-    
+
     roto_left_eye.setFlag(nuke.STARTLINE)
     roto_right_eye.clearFlag(nuke.STARTLINE)
-    
+
     roto_left_iris.setFlag(nuke.STARTLINE)
     roto_right_iris.clearFlag(nuke.STARTLINE)
-    
+
     roto_left_eyebrow.setFlag(nuke.STARTLINE)
     roto_right_eyebrow.clearFlag(nuke.STARTLINE)
-    
+
     # Add knobs in row-major order (Column 1, then Column 2)
     node.addKnob(roto_oval)
     node.addKnob(roto_nose_bridge)
-    
+
     node.addKnob(roto_left_nostril)
     node.addKnob(roto_right_nostril)
-    
+
     node.addKnob(roto_lips_outer)
     node.addKnob(roto_lips_inner)
-    
+
     node.addKnob(roto_left_eye)
     node.addKnob(roto_right_eye)
-    
+
     node.addKnob(roto_left_iris)
     node.addKnob(roto_right_iris)
-    
+
     node.addKnob(roto_left_eyebrow)
     node.addKnob(roto_right_eyebrow)
-    
+
     node.addKnob(nuke.Text_Knob("divider_roto_action", "", ""))
-    
+
     # Bezier Spline Toggle (Cusped Bezier)
     roto_bezier = nuke.Boolean_Knob("roto_bezier", "Cusped Bezier", False)
     roto_bezier.setFlag(nuke.STARTLINE)
     roto_bezier.setTooltip("If enabled, export Roto shapes as sharp linear/cusped polylines instead of smooth Bezier curves.")
     node.addKnob(roto_bezier)
-    
+
     create_roto_btn = nuke.PyScript_Knob("create_roto_btn", "Export Roto", "import nuke_tracker; nuke_tracker.generate_roto_node_from_panel(nuke.thisNode())")
     create_roto_btn.setFlag(nuke.STARTLINE)
     node.addKnob(create_roto_btn)
-    
+
     # 4. CornerPin Node Generation Tab
     cornerpin_tab = nuke.Tab_Knob("cornerpin_tab", "CornerPin")
     node.addKnob(cornerpin_tab)
-    
+
     node.addKnob(nuke.Text_Knob("divider_cornerpin", "CornerPin Export Settings", ""))
-    
+
     ref_frame_knob = nuke.Int_Knob("ref_frame", "Reference Frame")
     ref_frame_knob.setValue(int(nuke.frame()))
     node.addKnob(ref_frame_knob)
-    
+
     current_frame_btn = nuke.PyScript_Knob("set_ref_current", "Current Frame", "import nuke_tracker; nuke_tracker.set_ref_frame_to_current(nuke.thisNode())")
     node.addKnob(current_frame_btn)
-    
+
     node.addKnob(nuke.Text_Knob("divider_cornerpin_action", "", ""))
-    
+
     create_cornerpin_btn = nuke.PyScript_Knob("create_cornerpin_btn", "Export CornerPin", "import nuke_tracker; nuke_tracker.generate_cornerpin_node_from_panel(nuke.thisNode())")
     create_cornerpin_btn.setFlag(nuke.STARTLINE)
     node.addKnob(create_cornerpin_btn)
-    
+
     # Dynamic visibility callback script set on the knobChanged callback
     knob_changed_script = (
         "n = nuke.thisNode()\n"
@@ -444,20 +491,20 @@ def create_face_tracker_node():
         "    n['output_json'].setVisible(k.value())\n"
     )
     node['knobChanged'].setValue(knob_changed_script)
-    
+
     # Force the first tab ('Tracking') to be the default active tab on creation
     node.setTab(0)
-    
+
     # Initialize the output JSON path to be unique from the start
     get_unique_output_json_path(node)
-    
+
     return node
 
 
 def run_tracking_on_node(node):
-    """Reads options from the FaceTracker node, processes tracking on a 
+    """Reads options from the FaceTracker node, processes tracking on a
     temporarily rendered JPEG stream of the exact input pixel flow (supporting
-    all upstream grades, warps, stabilization, and switch nodes), and saves 
+    all upstream grades, warps, stabilization, and switch nodes), and saves
     the keyframed data.
     """
     # 1. Pipeline and Refinement Validation
@@ -465,7 +512,7 @@ def run_tracking_on_node(node):
     if not input_node:
         nuke.message("Please connect the Face Tracker node to an input node first.")
         return False
-        
+
     refine_enabled = node['refine_smartvectors'].value()
     backtrack_enabled = node['backtrack'].value() if 'backtrack' in node.knobs() else False
     vector_node = None
@@ -482,77 +529,66 @@ def run_tracking_on_node(node):
             nuke.message("The connected SmartVector node does not contain any recognizable vector channels.\n"
                          "Expected layers like 'smartvector_fwd', 'smartvector', 'forward', or 'motion' containing .u/.v or .x/.y channels.")
             return False
-        
+
     # Retrieve parameters directly from custom knobs
     start_frame = int(node['start_frame'].value())
     end_frame = int(node['end_frame'].value())
     if start_frame > end_frame:
         nuke.message("Start frame cannot be greater than end frame!")
         return False
-        
+
     output_json = get_unique_output_json_path(node)
     if not output_json:
         nuke.message("Please specify a valid path for the output JSON file.")
         return False
-        
+
     # Resolve all possible landmarks and contours to track everything in one go
     if not landmarks_config:
         nuke.message("Landmarks configuration could not be imported. Please verify backend/landmarks_config.py.")
         return False
-        
-    selected_names = []
-    
-    # 1. All sparse standard landmarks
-    for group in landmarks_config.LANDMARK_GROUPS.values():
-        selected_names.extend(group.keys())
-        
-    # 2. All dense contour landmarks
-    for group_name, pts in landmarks_config.CONTOUR_GROUPS.items():
-        selected_names.extend([f"{group_name}_{i}" for i in range(len(pts))])
-        
-    # 3. All full mesh landmarks
-    selected_names.extend([f"Mesh_{i}" for i in range(478)])
-    
-    # 4. All Roto contour groups
-    selected_names.extend(landmarks_config.CONTOUR_GROUPS.keys())
-        
-    # Filter unique list
-    selected_names = list(set(selected_names))
+
+    density = node['landmark_density'].value()
+    active_parts = get_active_tracker_parts(node)
+    selected_names = list(landmarks_config.get_landmarks_for_density(density, active_parts).keys())
+    selected_names.extend(get_selected_roto_contours(node))
+
+    # Preserve first occurrence while removing duplicate tracker/roto requests.
+    selected_names = list(dict.fromkeys(selected_names))
     landmarks_str = ",".join(selected_names)
     if not landmarks_str:
         nuke.message("Please select at least one landmark or contour group to track!")
         return False
-        
+
     # Determine immediate input dimensions for precise viewport scaling
     width = input_node.format().width()
     height = input_node.format().height()
-    
+
     # 2. Locate Virtual Environment Python
     if sys.platform == "win32":
         python_exe = os.path.join(plugin_dir, ".venv", "Scripts", "python.exe")
     else:
         python_exe = os.path.join(plugin_dir, ".venv", "bin", "python")
-        
+
     if not os.path.exists(python_exe):
         nuke.message(f"Virtual environment python not found at:\n{python_exe}\n\nPlease run 'install_requirements.bat' to set it up.")
         return False
-        
+
     backend_script = os.path.join(plugin_dir, "backend", "tracker_backend.py")
-    
+
     # 3. Compile backend parameters
     mode_val = "video" if "Video" in node['mode'].value() else "image"
-    
+
     quality_val = node['quality'].value()
     min_det_conf = 0.5
     min_track_conf = 0.5
-    
+
     if quality_val == "High Quality":
         min_det_conf = 0.6
         min_track_conf = 0.65
     elif quality_val == "Maximum":
         min_det_conf = 0.7
         min_track_conf = 0.8
-        
+
     nuke_fps = 24.0
     try:
         nuke_fps = nuke.root().fps()
@@ -565,46 +601,46 @@ def run_tracking_on_node(node):
         nuke_temp = nuke.temp_dir()
     except Exception:
         nuke_temp = None
-        
+
     import time
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     temp_dir = tempfile.mkdtemp(dir=nuke_temp, prefix=f"nuke_facetracker_{timestamp}_")
     temp_file_pattern = os.path.join(temp_dir, "frame_%04d.jpg").replace("\\", "/")
-    
+
     # Trigger Subprocess tracking with a native Nuke progress modal
     task = nuke.ProgressTask("MediaPipe Face Tracker")
     task.setMessage("Rendering active image stream to temporary cache...")
-    
+
     output_fwd = None
     output_bwd = None
     write_node = None
     success = False
-    
+
     try:
         # Create temporary Write node inside the Group context to render the active stream
         with node:
             internal_source = node.node("Source")
             if not internal_source:
                 raise ValueError("Internal 'Source' input node not found within FaceTracker Group.")
-            
+
             write_node = nuke.nodes.Write()
             write_node.setInput(0, internal_source)
             write_node['file'].setValue(temp_file_pattern)
             write_node['file_type'].setValue('jpeg')
-            
+
             # Set JPEG quality to high to preserve fine details for landmark detection
             if 'quality' in write_node.knobs():
                 write_node['quality'].setValue(0.9)
             elif '_jpeg_quality' in write_node.knobs():
                 write_node['_jpeg_quality'].setValue(0.9)
-                
+
         # Synchronously execute the temporary render in Nuke
         nuke.execute(write_node, start_frame, end_frame)
-        
+
         # Setup output paths for dual-pass tracking if backtrack is enabled (stored inside temp_dir)
         output_fwd = os.path.join(temp_dir, "output_fwd.json").replace("\\", "/")
         output_bwd = os.path.join(temp_dir, "output_bwd.json").replace("\\", "/")
-        
+
         # Setup base subprocess command referencing the temporary JPEGs
         base_cmd = [
             python_exe,
@@ -621,7 +657,7 @@ def run_tracking_on_node(node):
             "--min-det-confidence", str(min_det_conf),
             "--min-track-confidence", str(min_track_conf)
         ]
-        
+
         # Compile list of tracking passes to run
         passes_to_run = []
         if backtrack_enabled:
@@ -649,18 +685,18 @@ def run_tracking_on_node(node):
                 "offset": 0.0,
                 "output": output_json
             })
-            
+
         # Hide console terminal window on Windows platforms
         startupinfo = None
         if sys.platform == "win32":
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = 0 # SW_HIDE
-            
+
         # Execute each pass sequentially
         for p_idx, p_info in enumerate(passes_to_run):
             task.setMessage(f"Initializing face detection engine ({p_info['name']} pass)...")
-            
+
             try:
                 process = subprocess.Popen(
                     p_info["cmd"],
@@ -673,26 +709,26 @@ def run_tracking_on_node(node):
             except Exception as e:
                 nuke.message(f"Failed to start backend subprocess for {p_info['name']} pass:\n{str(e)}")
                 return False
-                
+
             error_logs = []
             pass_success = False
-            
+
             while True:
                 if task.isCancelled():
                     process.terminate()
                     nuke.message("Face tracking cancelled by user.")
                     return False
-                    
+
                 line = process.stdout.readline()
                 if not line:
                     break
-                    
+
                 line = line.strip()
                 print(f"[MediaPipe Backend {p_info['name']}] {line}")
-                
+
                 if "[ERROR]" in line or "Error:" in line or "Traceback" in line:
                     error_logs.append(line)
-                    
+
                 if line.startswith("PROGRESS:"):
                     match = re.search(r'PROGRESS:\s*(\d+)%', line)
                     if match:
@@ -705,42 +741,42 @@ def run_tracking_on_node(node):
                 elif line.startswith("[SUCCESS]"):
                     pass_success = True
                     task.setMessage(line)
-                    
+
             process.wait()
-            
+
             if process.returncode != 0 or not pass_success:
                 err_msg = "\n".join(error_logs[-10:]) if error_logs else "Unknown error occurred in the background process."
                 nuke.message(f"Backend {p_info['name']} pass failed (Exit Code: {process.returncode}):\n\n{err_msg}")
                 return False
-                
+
         # If backtracking was enabled, merge the two JSON outputs
         if backtrack_enabled:
             task.setMessage("Merging forward and backward tracking results...")
-            
+
             try:
                 with open(output_fwd, "r") as f:
                     fwd_data = json.load(f)
             except Exception as e:
                 nuke.message(f"Failed to read forward tracking JSON for merging:\n{str(e)}")
                 return False
-                
+
             try:
                 with open(output_bwd, "r") as f:
                     bwd_data = json.load(f)
             except Exception as e:
                 nuke.message(f"Failed to read backward tracking JSON for merging:\n{str(e)}")
                 return False
-                
+
             if not tracker_backend or not landmarks_config:
                 nuke.message("Failed to reference backend modules (tracker_backend or landmarks_config) for merging.")
                 return False
-                
+
             try:
                 selected_landmarks_list = [name.strip() for name in landmarks_str.split(",") if name.strip()]
                 contours_to_track = {name: landmarks_config.CONTOUR_GROUPS[name] for name in selected_landmarks_list if name in landmarks_config.CONTOUR_GROUPS}
                 individual_names = [name for name in selected_landmarks_list if name not in landmarks_config.CONTOUR_GROUPS]
                 landmarks_to_track = landmarks_config.get_landmarks_by_names(individual_names)
-                
+
                 merged_data = tracker_backend.merge_results(
                     fwd_data,
                     bwd_data,
@@ -752,7 +788,7 @@ def run_tracking_on_node(node):
                 traceback.print_exc()
                 nuke.message(f"Error during results merging:\n{str(e)}")
                 return False
-                
+
             try:
                 os.makedirs(os.path.dirname(output_json), exist_ok=True)
                 with open(output_json, "w") as f:
@@ -760,9 +796,9 @@ def run_tracking_on_node(node):
             except Exception as e:
                 nuke.message(f"Failed to save merged tracking JSON:\n{str(e)}")
                 return False
-                
+
         success = True
-        
+
         # 5. SmartVector refinement phase
         if refine_enabled:
             task.setMessage("Refining tracking coordinates with SmartVectors...")
@@ -772,18 +808,18 @@ def run_tracking_on_node(node):
             except Exception as e:
                 nuke.message(f"Failed to read tracking JSON for refinement:\n{str(e)}")
                 return False
-                
+
             success_refine = apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_channel, v_channel, task)
             if not success_refine:
                 return False
-                
+
             try:
                 with open(output_json, "w") as f:
                     json.dump(tracker_data, f, indent=2)
             except Exception as e:
                 nuke.message(f"Failed to save refined JSON:\n{str(e)}")
                 return False
-                
+
     finally:
         # Cleanup temporary Write node inside the Group context
         if write_node:
@@ -797,7 +833,7 @@ def run_tracking_on_node(node):
             shutil.rmtree(temp_dir)
         except Exception:
             pass
-            
+
         # Cleanup temporary forward/backward JSON files if they exist
         for tmp_file in [output_fwd, output_bwd]:
             if tmp_file and os.path.exists(tmp_file):
@@ -805,7 +841,7 @@ def run_tracking_on_node(node):
                     os.remove(tmp_file)
                 except Exception:
                     pass
-            
+
     # 6. Success message - printed to the script editor to avoid blocking modal dialogs
     print("[NukeFaceTracker] Face tracking completed successfully! Switch to 'Tracker' or 'Roto' tab to export.")
     return True
@@ -828,15 +864,15 @@ def get_landmarks_bbox(tracker_data, frame, width, height, padding=50):
             else:
                 xs.append(val[0])
                 ys.append(val[1])
-                
+
     if not xs or not ys:
         return [0, 0, width, height]
-        
+
     x_min = max(0, int(min(xs) - padding))
     y_min = max(0, int(min(ys) - padding))
     x_max = min(width, int(max(xs) + padding))
     y_max = min(height, int(max(ys) + padding))
-    
+
     # Handle collapsed or zero-size bbox
     if x_min >= x_max:
         x_min = max(0, x_min - 10)
@@ -844,7 +880,7 @@ def get_landmarks_bbox(tracker_data, frame, width, height, padding=50):
     if y_min >= y_max:
         y_min = max(0, y_min - 10)
         y_max = min(height, y_max + 10)
-        
+
     return [x_min, y_min, x_max, y_max]
 
 
@@ -855,15 +891,15 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
     vector_node = node.input(1)
     if not vector_node:
         return False
-        
+
     if not u_channel or not v_channel:
         u_channel, v_channel = find_vector_channels(vector_node)
         if not u_channel or not v_channel:
             nuke.message("Could not auto-detect recognizable vector channels for refinement.")
             return False
-        
+
     w = node['anchor_stiffness'].value()
-    
+
     # Determine format dimensions defensively
     try:
         width = vector_node.format().width()
@@ -875,7 +911,7 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
         except Exception:
             width = 1920
             height = 1080
-    
+
     # Create temporary in-memory CurveTool to force evaluation of the upstream pipeline at each frame.
     # To prevent the node from appearing in the user's Node Graph (DAG) and causing visual confusion,
     # we create it INSIDE the FaceTracker group's internal DAG context (using 'with node:')
@@ -891,13 +927,13 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
             force_node["ROI"].setValue([0, 0, width, height])
     except Exception as e:
         print(f"[SmartVector Refine] Warning: Failed to create hidden in-memory CurveTool: {str(e)}")
-    
+
     # Store original frame to restore later
     orig_frame = nuke.frame()
-    
+
     total_frames = end_frame - start_frame + 1
     previous_refined = {}
-    
+
     # Initialize previous_refined at the first frame of tracking
     first_frame_str = str(start_frame)
     for track_name, frame_data in tracker_data.items():
@@ -909,7 +945,7 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
             else:
                 # Tracker point
                 previous_refined[track_name] = list(val)
-                
+
     # Chronological loop
     for f_idx, frame in enumerate(range(start_frame + 1, end_frame + 1)):
         if task and task.isCancelled():
@@ -921,7 +957,7 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
             nuke.frame(orig_frame)
             nuke.message("SmartVector refinement cancelled by user.")
             return False
-            
+
         # Force evaluate upstream vector node at frame f-1
         if force_node:
             try:
@@ -931,11 +967,11 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
                 nuke.execute(force_node, frame - 1, frame - 1)
             except Exception as e:
                 pass
-            
+
         # Evaluate upstream vectors at frame f-1 to compute motion to frame f
         nuke.frame(frame - 1)
         frame_str = str(frame)
-        
+
         for track_name, frame_data in tracker_data.items():
             if track_name not in previous_refined:
                 if frame_str in frame_data:
@@ -945,28 +981,28 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
                     else:
                         previous_refined[track_name] = list(val)
                 continue
-                
+
             prev_val = previous_refined[track_name]
-            
+
             if isinstance(prev_val[0], list):
                 # Roto group: list of points
                 refined_pts = []
                 mp_pts = frame_data.get(frame_str)
-                
+
                 for idx, pt in enumerate(prev_val):
                     x_prev, y_prev = pt[0], pt[1]
-                    
+
                     # Sample motion vectors with standard pixel center offset
                     u = vector_node.sample(u_channel, x_prev + 0.5, y_prev + 0.5)
                     v = vector_node.sample(v_channel, x_prev + 0.5, y_prev + 0.5)
-                    
+
                     if frame < start_frame + 6 and idx == 0:
                         print(f"[SmartVector Refine] Frame {frame} - Roto '{track_name}' sampled motion: ({u:.4f}, {v:.4f})")
-                    
+
                     # Advection
                     x_motion = x_prev + u
                     y_motion = y_prev + v
-                    
+
                     # Correction
                     if mp_pts and idx < len(mp_pts):
                         x_mp, y_mp = mp_pts[idx][0], mp_pts[idx][1]
@@ -975,25 +1011,25 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
                     else:
                         x_ref = x_motion
                         y_ref = y_motion
-                        
+
                     refined_pts.append([round(x_ref, 3), round(y_ref, 3)])
-                    
+
                 frame_data[frame_str] = refined_pts
                 previous_refined[track_name] = refined_pts
-                
+
             else:
                 # Tracker point
                 x_prev, y_prev = prev_val[0], prev_val[1]
-                
+
                 u = vector_node.sample(u_channel, x_prev + 0.5, y_prev + 0.5)
                 v = vector_node.sample(v_channel, x_prev + 0.5, y_prev + 0.5)
-                
+
                 if frame < start_frame + 6:
                     print(f"[SmartVector Refine] Frame {frame} - Tracker '{track_name}' sampled motion: ({u:.4f}, {v:.4f})")
-                
+
                 x_motion = x_prev + u
                 y_motion = y_prev + v
-                
+
                 mp_pt = frame_data.get(frame_str)
                 if mp_pt:
                     x_mp, y_mp = mp_pt[0], mp_pt[1]
@@ -1002,24 +1038,24 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
                 else:
                     x_ref = x_motion
                     y_ref = y_motion
-                    
+
                 refined_pt = [round(x_ref, 3), round(y_ref, 3)]
-                
+
                 frame_data[frame_str] = refined_pt
                 previous_refined[track_name] = refined_pt
-                
+
         if task:
             progress_pct = 80 + int((f_idx + 1) / float(total_frames) * 20)
             task.setProgress(progress_pct)
             task.setMessage(f"Refining coordinates... frame {frame} of {end_frame} ({progress_pct}%)")
-            
+
     # Cleanup temporary force node
     if force_node:
         try:
             nuke.delete(force_node)
         except Exception:
             pass
-            
+
     nuke.frame(orig_frame)
     return True
 
@@ -1032,13 +1068,13 @@ def interpolate_missing_frames(frame_data, start_frame, end_frame):
     sorted_existing = sorted([int(f) for f in frame_data.keys() if str(f) in frame_data])
     if not sorted_existing:
         return {} # No data at all to interpolate
-        
+
     new_frame_data = {}
-    
+
     # Helper to check if a value is a list of points
     first_val = frame_data[str(sorted_existing[0])]
     is_list_of_points = isinstance(first_val[0], list)
-    
+
     for f in range(start_frame, end_frame + 1):
         f_str = str(f)
         if f_str in frame_data:
@@ -1049,7 +1085,7 @@ def interpolate_missing_frames(frame_data, start_frame, end_frame):
             # Find the closest lower frame and closest higher frame
             lower_frames = [lf for lf in sorted_existing if lf < f]
             higher_frames = [hf for hf in sorted_existing if hf > f]
-            
+
             if not lower_frames:
                 # Extrapolate from the first available frame (constant extrapolation)
                 closest_f = sorted_existing[0]
@@ -1064,10 +1100,10 @@ def interpolate_missing_frames(frame_data, start_frame, end_frame):
                 f_next = higher_frames[0]
                 val_prev = frame_data[str(f_prev)]
                 val_next = frame_data[str(f_next)]
-                
+
                 # Interpolation factor
                 t = (f - f_prev) / float(f_next - f_prev)
-                
+
                 if is_list_of_points:
                     # Interpolate list of points
                     interp_pts = []
@@ -1081,7 +1117,7 @@ def interpolate_missing_frames(frame_data, start_frame, end_frame):
                     x = val_prev[0] + t * (val_next[0] - val_prev[0])
                     y = val_prev[1] + t * (val_next[1] - val_prev[1])
                     new_frame_data[f_str] = [round(x, 3), round(y, 3)]
-                    
+
     return new_frame_data
 
 
@@ -1117,7 +1153,7 @@ def calculate_cornerpin_data(tracker_data, start_frame, end_frame, width=1920, h
                         pts.append(pt)
                 else:
                     pts.append(val)
-                    
+
         if pts:
             # Calculate rotation angle based on eye line orientation
             theta = 0.0
@@ -1125,18 +1161,18 @@ def calculate_cornerpin_data(tracker_data, start_frame, end_frame, width=1920, h
             right_outer = interpolated_tracks.get("Right_Eye_Outer", {}).get(f_str)
             left_inner = interpolated_tracks.get("Left_Eye_Inner", {}).get(f_str)
             left_outer = interpolated_tracks.get("Left_Eye_Outer", {}).get(f_str)
-            
+
             if right_inner and right_outer and left_inner and left_outer:
                 right_eye = [(right_inner[0] + right_outer[0]) / 2.0, (right_inner[1] + right_outer[1]) / 2.0]
                 left_eye = [(left_inner[0] + left_outer[0]) / 2.0, (left_inner[1] + left_outer[1]) / 2.0]
                 dx = left_eye[0] - right_eye[0]
                 dy = left_eye[1] - right_eye[1]
                 theta = math.atan2(dy, dx)
-                
+
             # Compute center of the face
             cx = sum(p[0] for p in pts) / len(pts)
             cy = sum(p[1] for p in pts) / len(pts)
-            
+
             # Rotate all points around center by -theta to align face horizontally
             cos_t = math.cos(-theta)
             sin_t = math.sin(-theta)
@@ -1147,7 +1183,7 @@ def calculate_cornerpin_data(tracker_data, start_frame, end_frame, width=1920, h
                 rx = cx + dx * cos_t - dy * sin_t
                 ry = cy + dx * sin_t + dy * cos_t
                 rotated_pts.append([rx, ry])
-                
+
             # Find AABB in rotated space
             r_xs = [p[0] for p in rotated_pts]
             r_ys = [p[1] for p in rotated_pts]
@@ -1155,7 +1191,7 @@ def calculate_cornerpin_data(tracker_data, start_frame, end_frame, width=1920, h
             y_min_rot = min(r_ys)
             x_max_rot = max(r_xs)
             y_max_rot = max(r_ys)
-            
+
             # Define corners in rotated space: BL, BR, TR, TL
             corners_rot = [
                 [x_min_rot, y_min_rot],
@@ -1163,7 +1199,7 @@ def calculate_cornerpin_data(tracker_data, start_frame, end_frame, width=1920, h
                 [x_max_rot, y_max_rot],
                 [x_min_rot, y_max_rot]
             ]
-            
+
             # Rotate corners back to image space by +theta
             cos_back = math.cos(theta)
             sin_back = math.sin(theta)
@@ -1174,11 +1210,11 @@ def calculate_cornerpin_data(tracker_data, start_frame, end_frame, width=1920, h
                 ox = cx + dx * cos_back - dy * sin_back
                 oy = cy + dx * sin_back + dy * cos_back
                 corners_orig.append([round(ox, 3), round(oy, 3)])
-                
+
             bbox_per_frame[frame] = corners_orig
         else:
             bbox_per_frame[frame] = [[0, 0], [width, 0], [width, height], [0, height]]
-            
+
     return bbox_per_frame
 
 
@@ -1187,7 +1223,7 @@ def generate_cornerpin_node(parent_node, json_path, width, height):
     if not os.path.exists(json_path):
         nuke.message(f"Output JSON file not found:\n{json_path}")
         return False
-        
+
     try:
         with open(json_path, "r") as f:
             tracker_data = json.load(f)
@@ -1210,13 +1246,13 @@ def generate_cornerpin_node(parent_node, json_path, width, height):
     # Resolve bounding box on the reference frame (clamped to available range)
     ref_clamped = max(start_frame, min(end_frame, ref_frame))
     ref_bbox = bbox_per_frame.get(ref_clamped, [[0, 0], [width, 0], [width, height], [0, height]])
-    
+
     # Deselect all nodes to cleanly connect the new CornerPin2D node
     for n in nuke.allNodes():
         n.setSelected(False)
-        
+
     parent_node.setSelected(True)
-    
+
     # Create the CornerPin2D Node in the parent canvas context
     parent_group = parent_node.parent()
     with parent_group:
@@ -1261,29 +1297,18 @@ def generate_tracker_node(parent_node, json_path, width, height):
     if not os.path.exists(json_path):
         nuke.message(f"Output JSON file not found:\n{json_path}")
         return False
-        
+
     try:
         with open(json_path, "r") as f:
             tracker_data = json.load(f)
     except Exception as e:
         nuke.message(f"Failed to parse JSON file:\n{str(e)}")
         return False
-        
+
     # Resolve selected landmarks based on CURRENT options in the properties panel
     density = parent_node['landmark_density'].value()
-    
-    active_parts = []
-    if parent_node['track_nose'].value():
-        active_parts.append("Nose")
-    if parent_node['track_eyes'].value():
-        active_parts.append("Eyes")
-    if parent_node['track_eyebrows'].value():
-        active_parts.append("Eyebrows")
-    if parent_node['track_mouth'].value():
-        active_parts.append("Mouth")
-    if parent_node['track_contour'].value():
-        active_parts.append("Face Shape")
-        
+
+    active_parts = get_active_tracker_parts(parent_node)
     resolved_landmarks = landmarks_config.get_landmarks_for_density(density, active_parts)
     selected_landmarks = list(resolved_landmarks.keys())
 
@@ -1302,45 +1327,45 @@ def generate_tracker_node(parent_node, json_path, width, height):
                 interpolated_data = interpolate_missing_frames(data, start_frame, end_frame)
                 if interpolated_data:
                     active_tracks[name] = interpolated_data
-                    
+
     # Inject corner pin tracker points if requested
     if parent_node['export_cornerpin_tracker'].value():
         bbox_per_frame = calculate_cornerpin_data(tracker_data, start_frame, end_frame, width, height)
-        
+
         # Build 4 separate tracking datasets
         corner_bl = {}
         corner_br = {}
         corner_tr = {}
         corner_tl = {}
-        
+
         for frame, corners in bbox_per_frame.items():
             f_str = str(frame)
             corner_bl[f_str] = corners[0] # BL [x, y]
             corner_br[f_str] = corners[1] # BR [x, y]
             corner_tr[f_str] = corners[2] # TR [x, y]
             corner_tl[f_str] = corners[3] # TL [x, y]
-            
+
         active_tracks["Corner_BL"] = corner_bl
         active_tracks["Corner_BR"] = corner_br
         active_tracks["Corner_TR"] = corner_tr
         active_tracks["Corner_TL"] = corner_tl
-                
+
     if not active_tracks:
         nuke.message("Please select at least one tracking landmark to export, or ensure you have tracked first.")
         return False
-        
+
     # Deselect all nodes to cleanly connect the new Tracker4 node to our custom node
     for n in nuke.allNodes():
         n.setSelected(False)
-        
+
     parent_node.setSelected(True)
-    
+
     # Create the Tracker4 Node in the parent canvas context
     parent_group = parent_node.parent()
     with parent_group:
         tracker = nuke.createNode('Tracker4')
     tracker.setName(f"Tracker_Face_{parent_node.name()}")
-    
+
     # Define Tracker4 database columns
     column_definitions = (
         "{\n"
@@ -1377,10 +1402,10 @@ def generate_tracker_node(parent_node, json_path, width, height):
         " { 2 1 0 key_centre_offset_y key_centre_offset_y 1 }\n"
         "}"
     )
-    
+
     tracker_strings = []
     num_tracks = len(active_tracks)
-    
+
     t_val = 1 if parent_node['export_t'].value() else 0
     r_val = 1 if parent_node['export_r'].value() else 0
     s_val = 1 if parent_node['export_s'].value() else 0
@@ -1389,19 +1414,19 @@ def generate_tracker_node(parent_node, json_path, width, height):
         sorted_frames = sorted([int(f) for f in frame_data.keys()])
         if not sorted_frames:
             continue
-            
+
         first_frame = sorted_frames[0]
-        
+
         x_curve_parts = []
         y_curve_parts = []
         for frame in sorted_frames:
             coords = frame_data[str(frame)]
             x_curve_parts.append(f"x{frame} {coords[0]}")
             y_curve_parts.append(f"x{frame} {coords[1]}")
-            
+
         x_curve_str = " ".join(x_curve_parts)
         y_curve_str = " ".join(y_curve_parts)
-        
+
         tracker_str = (
             f"{{ {{curve K x{first_frame} 1}} \"{point_name}\" "
             f"{{curve {x_curve_str}}} {{curve {y_curve_str}}} "
@@ -1410,19 +1435,19 @@ def generate_tracker_node(parent_node, json_path, width, height):
             f"{{}} {{}} {{}} {{}} {{}} {{}} {{}} {{}} {{}} {{}} {{}} }}"
         )
         tracker_strings.append(tracker_str)
-        
+
     tracker_strings_combined = "{\n" + "\n".join(tracker_strings) + "\n}"
     from_script_str = f"{{ 1 31 {num_tracks} }} \n{column_definitions} \n{tracker_strings_combined}\n"
-    
+
     try:
         tracker['tracks'].fromScript(from_script_str)
     except Exception as e:
         nuke.message(f"Failed to populate Tracker4 node tracks using fromScript:\n{str(e)}")
         return False
-        
+
     parent_node.setSelected(True)
     tracker.setSelected(True)
-    
+
     return True
 
 
@@ -1461,40 +1486,16 @@ def generate_roto_node(parent_node, json_path, width, height):
     if not os.path.exists(json_path):
         nuke.message(f"Output JSON file not found:\n{json_path}")
         return False
-        
+
     try:
         with open(json_path, "r") as f:
             roto_data = json.load(f)
     except Exception as e:
         nuke.message(f"Failed to parse JSON file:\n{str(e)}")
         return False
-        
+
     # Resolve selected contours based on CURRENT options in the properties panel
-    selected_contours = []
-    if parent_node['roto_oval'].value():
-        selected_contours.append("Face_Oval")
-    if parent_node['roto_lips_outer'].value():
-        selected_contours.append("Lips_Outer")
-    if parent_node['roto_lips_inner'].value():
-        selected_contours.append("Lips_Inner")
-    if parent_node['roto_left_eye'].value():
-        selected_contours.append("Left_Eye")
-    if parent_node['roto_right_eye'].value():
-        selected_contours.append("Right_Eye")
-    if parent_node['roto_left_eyebrow'].value():
-        selected_contours.append("Left_Eyebrow")
-    if parent_node['roto_right_eyebrow'].value():
-        selected_contours.append("Right_Eyebrow")
-    if parent_node['roto_left_iris'].value():
-        selected_contours.append("Left_Iris")
-    if parent_node['roto_right_iris'].value():
-        selected_contours.append("Right_Iris")
-    if parent_node['roto_nose_bridge'].value():
-        selected_contours.append("Nose_Bridge")
-    if parent_node['roto_left_nostril'].value():
-        selected_contours.append("Nose_Left_Nostril")
-    if parent_node['roto_right_nostril'].value():
-        selected_contours.append("Nose_Right_Nostril")
+    selected_contours = get_selected_roto_contours(parent_node)
 
     # Read Bezier preference (Cusped Bezier: checked = no bezier/linear; unchecked = bezier/smooth)
     try:
@@ -1517,71 +1518,73 @@ def generate_roto_node(parent_node, json_path, width, height):
                 interpolated_data = interpolate_missing_frames(data, start_frame, end_frame)
                 if interpolated_data:
                     active_contours[name] = interpolated_data
-                
+
     if not active_contours:
         nuke.message("Please select at least one contour group to export, or ensure you have tracked first.")
         return False
-        
+
     try:
         import nuke.rotopaint as rp
     except ImportError:
         nuke.message("Failed to import nuke.rotopaint. Cannot generate Roto node.")
         return False
-        
+
     # Deselect all nodes to cleanly connect the new Roto node to our custom node
     for n in nuke.allNodes():
         n.setSelected(False)
-        
+
     parent_node.setSelected(True)
-    
+
     # Create the Roto Node in the parent canvas context
     parent_group = parent_node.parent()
     with parent_group:
         roto_node = nuke.createNode('Roto')
     roto_node.setName(f"Roto_Face_{parent_node.name()}")
-    
+
     curves_knob = roto_node['curves']
     root_layer = curves_knob.rootLayer
-    
+
     # Process each active contour group
     for group_name, frame_data in active_contours.items():
         sorted_frames = sorted([int(f) for f in frame_data.keys()])
         if not sorted_frames:
             continue
-            
+
         first_frame = sorted_frames[0]
         first_points = frame_data[str(first_frame)]
         num_points = len(first_points)
-        
+
         # 1. Create the Shape object
         shape = rp.Shape(curves_knob)
         shape.name = group_name
-        
-        # Set the shape to be closed using the low-level _curvelib API
+
+        is_closed = group_name not in getattr(landmarks_config, "OPEN_CONTOUR_GROUPS", set())
+
+        # Set shape closure using the low-level _curvelib API
         try:
             import _curvelib
-            shape.getAttributes().set(0, _curvelib.AnimAttributes.kClosedAttribute, 1.0)
+            shape.getAttributes().set(0, _curvelib.AnimAttributes.kClosedAttribute, 1.0 if is_closed else 0.0)
         except Exception as e:
-            print(f"[NukeFaceTracker] Failed to set closed attribute via _curvelib: {e}")
-        
+            print(f"[NukeFaceTracker] Failed to set shape closed attribute via _curvelib: {e}")
+
         # 2. Add control points initialized at first frame coordinates
         for coords in first_points:
             cp = rp.AnimControlPoint(coords[0], coords[1])
             shape.append(cp)
-            
+
         # Add the shape to the root layer first so its curves are registered with the knob
         root_layer.append(shape)
-        
+
         # 3. Animate each control point over the available frames
         for frame in sorted_frames:
             points = frame_data[str(frame)]
             if len(points) != num_points:
                 continue # Safety skip
-                
+
             for idx, coords in enumerate(points):
                 shape_point = shape[idx]
                 anim_point = shape_point.center
-                
+
                 # Set coordinate keyframes using AnimCurve.addKey
                 _add_position_key(anim_point, frame, coords[0], coords[1])
 
@@ -1591,14 +1594,14 @@ def generate_roto_node(parent_node, json_path, width, height):
                 )
                 if feather_center is not None:
                     _add_position_key(feather_center, frame, coords[0], coords[1])
-                
+
                 # If Bezier is enabled and there are enough points, calculate smooth tangents
-                if bezier_enabled and num_points > 2:
+                if is_closed and bezier_enabled and num_points > 2:
                     tx, ty = _calculate_closed_bezier_tangent(points, idx)
-                    
+
                     # Left tangent handle (incoming)
                     _add_position_key(shape_point.leftTangent, frame, -tx, -ty)
-                    
+
                     # Right tangent handle (outgoing)
                     _add_position_key(shape_point.rightTangent, frame, tx, ty)
 
@@ -1615,13 +1618,13 @@ def generate_roto_node(parent_node, json_path, width, height):
                     )
                     if feather_right_tangent is not None:
                         _add_position_key(feather_right_tangent, frame, tx, ty)
-                
+
     # Force Nuke to evaluate and refresh the curves in the viewer
     curves_knob.changed()
-    
+
     parent_node.setSelected(True)
     roto_node.setSelected(True)
-    
+
     return True
 
 
@@ -1631,7 +1634,7 @@ def generate_tracker_node_from_panel(node):
     if not json_path:
         nuke.message("Please specify a valid output JSON file path first.")
         return False
-        
+
     input_node = node.input(0)
     if input_node:
         try:
@@ -1643,7 +1646,7 @@ def generate_tracker_node_from_panel(node):
     else:
         width = nuke.root().format().width()
         height = nuke.root().format().height()
-        
+
     return generate_tracker_node(node, json_path, width, height)
 
 
@@ -1653,7 +1656,7 @@ def generate_roto_node_from_panel(node):
     if not json_path:
         nuke.message("Please specify a valid output JSON file path first.")
         return False
-        
+
     input_node = node.input(0)
     if input_node:
         try:
@@ -1665,7 +1668,7 @@ def generate_roto_node_from_panel(node):
     else:
         width = nuke.root().format().width()
         height = nuke.root().format().height()
-        
+
     return generate_roto_node(node, json_path, width, height)
 
 
@@ -1675,7 +1678,7 @@ def generate_cornerpin_node_from_panel(node):
     if not json_path:
         nuke.message("Please specify a valid output JSON file path first.")
         return False
-        
+
     input_node = node.input(0)
     if input_node:
         try:
@@ -1687,7 +1690,7 @@ def generate_cornerpin_node_from_panel(node):
     else:
         width = nuke.root().format().width()
         height = nuke.root().format().height()
-        
+
     return generate_cornerpin_node(node, json_path, width, height)
 
 

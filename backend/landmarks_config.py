@@ -62,11 +62,23 @@ CONTOUR_GROUPS = {
     # --- New Premium Contours ---
     "Left_Iris": [469, 470, 471, 472],
     "Right_Iris": [474, 475, 476, 477],
-    "Nose_Bridge": [6, 197, 195, 5, 168],
+    "Nose_Bridge_Contour": [6, 197, 195, 5, 168],
     "Nose_Left_Nostril": [458, 250, 290, 305, 392, 309],
     "Nose_Right_Nostril": [75, 60, 20, 238, 79, 166],
     "Left_Cheek_Bone": [454, 356, 389],
     "Right_Cheek_Bone": [234, 127, 162]
+}
+
+DENSE_PART_TO_CONTOURS = {
+    "Nose": ["Nose_Bridge_Contour", "Nose_Left_Nostril", "Nose_Right_Nostril"],
+    "Eyes": ["Left_Eye", "Right_Eye", "Left_Iris", "Right_Iris"],
+    "Eyebrows": ["Left_Eyebrow", "Right_Eyebrow"],
+    "Mouth": ["Lips_Outer", "Lips_Inner"],
+    "Face Shape": ["Face_Oval", "Left_Cheek_Bone", "Right_Cheek_Bone"],
+}
+
+OPEN_CONTOUR_GROUPS = {
+    "Nose_Bridge_Contour",
 }
 
 # --- FULL MESH PARTITION INDICES (Strict mathematical subsets of all 478 landmarks) ---
@@ -98,62 +110,30 @@ FACE_SHAPE_MESH_INDICES = sorted(list(set(range(478)) - set(EYEBROWS_MESH_INDICE
 # --- DYNAMIC LANDMARK RESOLVER ---
 def get_landmarks_for_density(density, active_parts):
     """
-    Returns a resolved dictionary of {landmark_name: index} based on density level 
+    Returns a resolved dictionary of {landmark_name: index} based on density level
     and list of active parts selected by the user.
     """
     resolved = {}
     active_set = set(active_parts)
-    
+
     if "Sparse" in density:
         for part, landmarks in LANDMARK_GROUPS.items():
             if part in active_set:
                 for name, idx in landmarks.items():
                     resolved[name] = idx
-                    
+
     elif "Dense" in density:
-        # Define contour group mappings for each UI checkbox part
-        part_to_contours = {
-            "Nose": ["Nose_Bridge", "Nose_Left_Nostril", "Nose_Right_Nostril", "Left_Iris", "Right_Iris"], # Include irises in dense features
-            "Eyes": ["Left_Eye", "Right_Eye", "Left_Iris", "Right_Iris"],
-            "Eyebrows": ["Left_Eyebrow", "Right_Eyebrow"],
-            "Mouth": ["Lips_Outer", "Lips_Inner"],
-            "Face Shape": ["Face_Oval", "Left_Cheek_Bone", "Right_Cheek_Bone"]
-        }
-        
-        # Track Nose Bridge/Alars if Nose is selected
         if "Nose" in active_set:
-            # Nose sparse landmarks are used in Dense as well
             for name, idx in LANDMARK_GROUPS["Nose"].items():
                 resolved[name] = idx
-            for contour_name in ["Nose_Bridge", "Nose_Left_Nostril", "Nose_Right_Nostril"]:
-                pts = CONTOUR_GROUPS[contour_name]
-                for i, idx in enumerate(pts):
-                    resolved[f"{contour_name}_{i}"] = idx
-                    
-        if "Eyes" in active_set:
-            for contour_name in ["Left_Eye", "Right_Eye", "Left_Iris", "Right_Iris"]:
-                pts = CONTOUR_GROUPS[contour_name]
-                for i, idx in enumerate(pts):
-                    resolved[f"{contour_name}_{i}"] = idx
-                    
-        if "Eyebrows" in active_set:
-            for contour_name in ["Left_Eyebrow", "Right_Eyebrow"]:
-                pts = CONTOUR_GROUPS[contour_name]
-                for i, idx in enumerate(pts):
-                    resolved[f"{contour_name}_{i}"] = idx
-                    
-        if "Mouth" in active_set:
-            for contour_name in ["Lips_Outer", "Lips_Inner"]:
-                pts = CONTOUR_GROUPS[contour_name]
-                for i, idx in enumerate(pts):
-                    resolved[f"{contour_name}_{i}"] = idx
-                    
-        if "Face Shape" in active_set:
-            for contour_name in ["Face_Oval", "Left_Cheek_Bone", "Right_Cheek_Bone"]:
-                pts = CONTOUR_GROUPS[contour_name]
-                for i, idx in enumerate(pts):
-                    resolved[f"{contour_name}_{i}"] = idx
-                    
+
+        for part, contour_names in DENSE_PART_TO_CONTOURS.items():
+            if part in active_set:
+                for contour_name in contour_names:
+                    pts = CONTOUR_GROUPS[contour_name]
+                    for i, idx in enumerate(pts):
+                        resolved[f"{contour_name}_{i}"] = idx
+
     elif "Full" in density:
         part_to_mesh_indices = {
             "Nose": NOSE_MESH_INDICES,
@@ -166,7 +146,7 @@ def get_landmarks_for_density(density, active_parts):
             if part in active_set:
                 for idx in indices:
                     resolved[f"Mesh_{idx}"] = idx
-                    
+
     return resolved
 
 
@@ -183,7 +163,7 @@ def get_landmarks_by_names(names):
     """Returns a dictionary {name: index} for the given names (or all landmarks if names is empty)."""
     if not names:
         return ALL_LANDMARKS
-        
+
     result = {}
     for name in names:
         if name in ALL_LANDMARKS:

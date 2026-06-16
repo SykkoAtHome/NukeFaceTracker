@@ -9,7 +9,7 @@ import landmarks_config
 import tracker_backend
 
 class TestNukeFaceTracker(unittest.TestCase):
-    
+
     def test_get_landmarks_by_names_all(self):
         """Test retrieving all landmarks when no names are specified."""
         res = landmarks_config.get_landmarks_by_names([])
@@ -78,6 +78,16 @@ class TestNukeFaceTracker(unittest.TestCase):
         self.assertEqual(landmarks_config.LANDMARK_GROUPS["Nose"]["Nose_Left_Alar"], 358)
         self.assertEqual(landmarks_config.LANDMARK_GROUPS["Nose"]["Nose_Right_Alar"], 129)
 
+    def test_nose_bridge_scalar_and_contour_do_not_collide(self):
+        """Verify sparse Nose_Bridge and dense nose bridge contour use distinct JSON keys."""
+        self.assertEqual(landmarks_config.LANDMARK_GROUPS["Nose"]["Nose_Bridge"], 168)
+        self.assertNotIn("Nose_Bridge", landmarks_config.CONTOUR_GROUPS)
+        self.assertIn("Nose_Bridge_Contour", landmarks_config.CONTOUR_GROUPS)
+
+        res = landmarks_config.get_landmarks_for_density("Dense (Contours - 149 pts)", ["Nose"])
+        self.assertEqual(res["Nose_Bridge"], 168)
+        self.assertEqual(res["Nose_Bridge_Contour_0"], 6)
+
     def test_mesh_partition_properties(self):
         """Verify that the 478 landmark mesh is partitioned cleanly with no overlaps or missing indices."""
         eyebrows = set(landmarks_config.EYEBROWS_MESH_INDICES)
@@ -120,11 +130,11 @@ class TestNukeFaceTracker(unittest.TestCase):
     def test_get_landmarks_for_density_dense(self):
         """Verify dense resolver returns sequential contours and nose sparse/contour points."""
         res = landmarks_config.get_landmarks_for_density("Dense (Contours - 149 pts)", ["Eyebrows", "Eyes"])
-        
+
         # Check that Eyebrows contour tracks are in the resolved set
         self.assertIn("Left_Eyebrow_0", res)
         self.assertIn("Right_Eyebrow_0", res)
-        
+
         # Check that Eyes and Irises contour tracks are in the resolved set
         self.assertIn("Left_Eye_0", res)
         self.assertIn("Right_Eye_0", res)
@@ -142,10 +152,10 @@ class TestNukeFaceTracker(unittest.TestCase):
         """Verify that Left_Iris and Right_Iris contour lists have exactly 4 points and do not include the centers."""
         left_iris_contour = landmarks_config.CONTOUR_GROUPS["Left_Iris"]
         right_iris_contour = landmarks_config.CONTOUR_GROUPS["Right_Iris"]
-        
+
         self.assertEqual(len(left_iris_contour), 4)
         self.assertEqual(len(right_iris_contour), 4)
-        
+
         # Verify center points (468, 473) are not in the contour boundaries
         self.assertNotIn(468, left_iris_contour)
         self.assertNotIn(473, right_iris_contour)
@@ -154,10 +164,10 @@ class TestNukeFaceTracker(unittest.TestCase):
         """Verify that Left and Right Nostril contours contain the standard 6 points defining the nostrils."""
         left_nostril = landmarks_config.CONTOUR_GROUPS["Nose_Left_Nostril"]
         right_nostril = landmarks_config.CONTOUR_GROUPS["Nose_Right_Nostril"]
-        
+
         self.assertEqual(len(left_nostril), 6)
         self.assertEqual(len(right_nostril), 6)
-        
+
         # Verify standard landmarks are in the sets
         self.assertTrue(set([250, 290, 305, 309, 392, 458]).issubset(set(left_nostril)))
         self.assertTrue(set([20, 60, 75, 79, 166, 238]).issubset(set(right_nostril)))
@@ -184,12 +194,12 @@ class TestNukeFaceTracker(unittest.TestCase):
                 "3": [[11.0, 12.0], [13.0, 14.0]]
             }
         }
-        
+
         contours_to_track = {"Lips_Outer": [0, 1]}
         landmarks_to_track = {"Nose_Tip": 4}
-        
+
         merged = tracker_backend.merge_results(forward, backward, contours_to_track, landmarks_to_track)
-        
+
         # Verify Nose_Tip
         # Frame 1: Only in forward -> [10.0, 20.0]
         self.assertEqual(merged["Nose_Tip"]["1"], [10.0, 20.0])
@@ -197,7 +207,7 @@ class TestNukeFaceTracker(unittest.TestCase):
         self.assertEqual(merged["Nose_Tip"]["2"], [13.0, 23.0])
         # Frame 3: Only in backward -> [16.0, 26.0]
         self.assertEqual(merged["Nose_Tip"]["3"], [16.0, 26.0])
-        
+
         # Verify Lips_Outer
         # Frame 1: Only forward -> [[1.0, 2.0], [3.0, 4.0]]
         self.assertEqual(merged["Lips_Outer"]["1"], [[1.0, 2.0], [3.0, 4.0]])
