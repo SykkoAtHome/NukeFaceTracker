@@ -242,6 +242,16 @@ def create_face_tracker_node():
     node.addKnob(info_full_mesh)
     info_full_mesh.setVisible(False)
     
+    node.addKnob(nuke.Text_Knob("divider_flags", "Export Transform Flags", ""))
+    export_t = nuke.Boolean_Knob("export_t", "T (Translate)", True)
+    export_r = nuke.Boolean_Knob("export_r", "R (Rotation)", False)
+    export_s = nuke.Boolean_Knob("export_s", "S (Scale)", False)
+    export_r.clearFlag(nuke.STARTLINE)
+    export_s.clearFlag(nuke.STARTLINE)
+    node.addKnob(export_t)
+    node.addKnob(export_r)
+    node.addKnob(export_s)
+    
     node.addKnob(nuke.Text_Knob("divider_tracker_action", "", ""))
     
     create_tracker_btn = nuke.PyScript_Knob("create_tracker_btn", "Export Tracker", "import nuke_tracker; nuke_tracker.generate_tracker_node_from_panel(nuke.thisNode())")
@@ -865,6 +875,10 @@ def generate_tracker_node(parent_node, json_path, width, height):
     tracker_strings = []
     num_tracks = len(active_tracks)
     
+    t_val = 1 if parent_node['export_t'].value() else 0
+    r_val = 1 if parent_node['export_r'].value() else 0
+    s_val = 1 if parent_node['export_s'].value() else 0
+
     for point_name, frame_data in active_tracks.items():
         sorted_frames = sorted([int(f) for f in frame_data.keys()])
         if not sorted_frames:
@@ -885,7 +899,7 @@ def generate_tracker_node(parent_node, json_path, width, height):
         tracker_str = (
             f"{{ {{curve K x{first_frame} 1}} \"{point_name}\" "
             f"{{curve {x_curve_str}}} {{curve {y_curve_str}}} "
-            f"{{curve K x{first_frame} 0}} {{curve K x{first_frame} 0}} 1 0 0 "
+            f"{{curve K x{first_frame} 0}} {{curve K x{first_frame} 0}} {t_val} {r_val} {s_val} "
             f"{{curve x{first_frame} 0}} 1 0 -15 -15 15 15 -10 -10 10 10 "
             f"{{}} {{}} {{}} {{}} {{}} {{}} {{}} {{}} {{}} {{}} {{}} }}"
         )
