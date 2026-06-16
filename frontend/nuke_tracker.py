@@ -555,10 +555,14 @@ def generate_roto_node(parent_node, json_path, width, height):
         
         # 1. Create the Shape object
         shape = rp.Shape(curves_knob)
-        shape_dir = dir(shape)
-        shape_type = str(type(shape))
-        raise AttributeError(f"TYPE: {shape_type} | ATTRIBUTES: {shape_dir}")
         shape.name = group_name
+        
+        # Set the shape to be closed using the low-level _curvelib API
+        try:
+            import _curvelib
+            shape.getAttributes().set(0, _curvelib.AnimAttributes.kClosedAttribute, 1.0)
+        except Exception as e:
+            print(f"[NukeFaceTracker] Failed to set closed attribute via _curvelib: {e}")
         
         # 2. Add control points initialized at first frame coordinates
         for coords in first_points:
