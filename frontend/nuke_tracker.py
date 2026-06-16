@@ -63,6 +63,20 @@ class FaceTrackerPanel(nukescripts.PythonPanel):
         self.addKnob(self.start_knob)
         self.addKnob(self.end_knob)
         
+        # Spacer / Divider
+        self.divider_quality = nuke.Text_Knob("div_quality", "Quality & Stabilization:", "")
+        self.addKnob(self.divider_quality)
+        
+        # 5. Tracking Mode
+        self.mode_knob = nuke.Enumeration_Knob("mode", "Tracking Mode:", ["Video (Smooth / Stabilized)", "Image (Frame-by-Frame)"])
+        self.mode_knob.setTooltip("Video mode uses temporal tracking (Kalman filters) to eliminate frame-to-frame landmark jitter.\n\nImage mode runs raw face detection on each frame independently.")
+        self.addKnob(self.mode_knob)
+        
+        # 6. Tracking Quality
+        self.quality_knob = nuke.Enumeration_Knob("quality", "Tracking Quality:", ["Standard", "High Quality", "Maximum"])
+        self.quality_knob.setTooltip("Higher quality levels increase the confidence thresholds to prevent tracking drift or false detections.")
+        self.addKnob(self.quality_knob)
+        
         # Section Divider
         self.divider2 = nuke.Text_Knob("div2", "Select Landmarks to Track:", "")
         self.addKnob(self.divider2)
@@ -150,6 +164,28 @@ class FaceTrackerPanel(nukescripts.PythonPanel):
         backend_script = os.path.join(plugin_dir, "backend", "tracker_backend.py")
         
         # 3. Build command line
+        # Map tracking mode value
+        mode_val = "video" if "Video" in self.mode_knob.value() else "image"
+        
+        # Map quality preset to confidence parameters
+        quality_val = self.quality_knob.value()
+        min_det_conf = 0.5
+        min_track_conf = 0.5
+        
+        if quality_val == "High Quality":
+            min_det_conf = 0.6
+            min_track_conf = 0.65
+        elif quality_val == "Maximum":
+            min_det_conf = 0.7
+            min_track_conf = 0.8
+            
+        # Try to query Nuke project FPS (default to 24.0 on error)
+        nuke_fps = 24.0
+        try:
+            nuke_fps = nuke.root().fps()
+        except Exception:
+            pass
+            
         cmd = [
             python_exe,
             backend_script,
@@ -159,7 +195,11 @@ class FaceTrackerPanel(nukescripts.PythonPanel):
             "--end", str(end_frame),
             "--width", str(self.width),
             "--height", str(self.height),
-            "--landmarks", landmarks_str
+            "--landmarks", landmarks_str,
+            "--mode", mode_val,
+            "--fps", str(nuke_fps),
+            "--min-det-confidence", str(min_det_conf),
+            "--min-track-confidence", str(min_track_conf)
         ]
         
         # Hide cmd console window on Windows

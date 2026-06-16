@@ -41,6 +41,10 @@ def main():
     parser.add_argument("--width", type=int, help="Optional frame width (passed from Nuke)")
     parser.add_argument("--height", type=int, help="Optional frame height (passed from Nuke)")
     parser.add_argument("--landmarks", help="Comma-separated landmark names to track")
+    parser.add_argument("--mode", default="video", choices=["image", "video"], help="Tracking mode: image (frame-by-frame) or video (temporal tracking)")
+    parser.add_argument("--fps", type=float, default=24.0, help="Framerate for temporal tracking (video mode)")
+    parser.add_argument("--min-det-confidence", type=float, default=0.5, help="Minimum face detection confidence (0.0-1.0)")
+    parser.add_argument("--min-track-confidence", type=float, default=0.5, help="Minimum tracking confidence (0.0-1.0)")
     
     args = parser.parse_args()
     
@@ -63,9 +67,15 @@ def main():
             
     # Initialize MediaPipe Face Landmarker
     try:
+        run_mode = vision.RunningMode.VIDEO if args.mode == "video" else vision.RunningMode.IMAGE
+        print(f"[INFO] Using MediaPipe RunningMode: {run_mode.name}")
+        
         base_options = python.BaseOptions(model_asset_path=model_path)
         options = vision.FaceLandmarkerOptions(
             base_options=base_options,
+            running_mode=run_mode,
+            min_face_detection_confidence=args.min_det_confidence,
+            min_tracking_confidence=args.min_track_confidence,
             output_face_blendshapes=False,
             output_facial_transformation_matrixes=False,
             num_faces=1
@@ -89,10 +99,19 @@ def main():
             print(f"[ERROR] Failed to open video file: {args.input}")
             sys.exit(1)
             
-    # Resolve resolution
+    # Resolve resolution and frame rate
     width = args.width
     height = args.height
     
+    fps = args.fps
+    if not is_sequence and cap:
+        video_fps = cap.get(cv2.CAP_PROP_FPS)
+        if video_fps and video_fps > 0:
+            fps = video_fps
+            
+    if not fps or fps <= 0:
+        fps = 24.0
+        
     if (not width or not height) and cap:
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -136,7 +155,12 @@ def main():
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_image)
         
         # Perform inference
-        detection_result = detector.detect(mp_image)
+        if run_mode == vision.RunningMode.VIDEO:
+            # Generate a monotonic timestamp in milliseconds based on project FPS and frame number
+            timestamp_ms = int(frame_num * 1000.0 / fps)
+            detection_result = detector.detect_for_video(mp_image, timestamp_ms)
+        else:
+            detection_result = detector.detect(mp_image)
         
         if detection_result.face_landmarks:
             landmarks = detection_result.face_landmarks[0]
