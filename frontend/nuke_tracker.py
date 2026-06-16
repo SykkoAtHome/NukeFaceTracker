@@ -33,6 +33,68 @@ def find_upstream_read(node):
     return None
 
 
+def find_vector_channels(node):
+    """Scans a node's channels to find the best horizontal (U/X) and vertical (V/Y) 
+    vector channel pair.
+    
+    Prioritizes:
+    1. Layers containing 'smartvector' (e.g. smartvector_fwd, smartvector) with .u/.v or .x/.y
+    2. Layers containing 'forward' (e.g. forward) with .u/.v or .x/.y
+    3. Layers containing 'motion' (e.g. motion) with .u/.v or .x/.y
+    4. Any layer with .u/.v or .x/.y
+    
+    Returns:
+        (u_channel, v_channel) if found, otherwise (None, None)
+    """
+    if not node:
+        return None, None
+        
+    try:
+        channels = node.channels()
+    except Exception:
+        return None, None
+    
+    # Extract unique layer names
+    layers = set()
+    for ch in channels:
+        if '.' in ch:
+            layers.add(ch.split('.')[0])
+            
+    # Define channel suffix pairs in order of preference
+    suffix_pairs = [('.u', '.v'), ('.x', '.y')]
+    
+    # We will score each layer to find the best match
+    best_score = -1
+    best_pair = (None, None)
+    
+    for layer in layers:
+        for suffix_u, suffix_v in suffix_pairs:
+            ch_u = f"{layer}{suffix_u}"
+            ch_v = f"{layer}{suffix_v}"
+            if ch_u in channels and ch_v in channels:
+                # Score this layer based on its name
+                score = 0
+                lower_layer = layer.lower()
+                if 'smartvector' in lower_layer:
+                    score = 100
+                    # Give higher preference to fwd over bwd
+                    if 'fwd' in lower_layer:
+                        score += 10
+                elif 'forward' in lower_layer:
+                    score = 50
+                elif 'motion' in lower_layer:
+                    score = 30
+                else:
+                    score = 10
+                    
+                if score > best_score:
+                    best_score = score
+                    best_pair = (ch_u, ch_v)
+                    
+    return best_pair
+
+
+
 def set_range_to_input(node):
     """Callback function to sync the node's frame range to its active upstream input."""
     input_node = node.input(0)
@@ -57,18 +119,27 @@ def create_face_tracker_node():
 
     populating it with all standard tracking knobs.
     """
-    # Create NoOp Node which serves as pass-through
-    node = nuke.createNode('NoOp')
+    # Create Group Node which serves as pass-through
+    node = nuke.createNode('Group')
     node.setName("FaceTracker", True)
     
     # Give it a nice, distinctive orange/copper tile color for identification in DAG
     node['tile_color'].setValue(0xff8c00ff)
     
+    # Setup internal pipeline for the Group node
+    with node:
+        input_source = nuke.createNode('Input', inpanel=False)
+        input_source.setName("Source")
+        
+        input_vectors = nuke.createNode('Input', inpanel=False)
+        input_vectors.setName("SmartVector")
+        
+        output = nuke.createNode('Output', inpanel=False)
+        output.setInput(0, input_source)
+    
     # Create the Custom Properties tab
     tab_knob = nuke.Tab_Knob("face_tracker_tab", "Face Tracker")
     node.addKnob(tab_knob)
-    
-
     
     # Resolve initial ranges based on selected nodes or project
     start_frame = 1
@@ -112,6 +183,18 @@ def create_face_tracker_node():
     density_knob = nuke.Enumeration_Knob("landmark_density", "Landmark Density", ["Sparse (Standard - 29 pts)", "Dense (Contours - 128 pts)", "Full (Entire Mesh - 468 pts)"])
     density_knob.setTooltip("Sparse: Tracks up to 29 standard facial features.\nDense: Tracks up to 128 sequential contour points.\nFull: Tracks the entire 468-point face mesh topology.")
     node.addKnob(density_knob)
+    
+    # Refinement Section
+    refine_knob = nuke.Boolean_Knob("refine_smartvectors", "Refine with SmartVectors", False)
+    refine_knob.setTooltip("Enables high-precision local refinement of tracking coordinates using motion vectors from the 'SmartVector' input.")
+    node.addKnob(refine_knob)
+    
+    stiffness_knob = nuke.Double_Knob("anchor_stiffness", "Anchor Stiffness")
+    stiffness_knob.setValue(0.1)
+    stiffness_knob.setRange(0.01, 0.5)
+    stiffness_knob.setTooltip("Controls the blend ratio between local motion tracking and global MediaPipe anchors on each frame.\nLower values (e.g. 0.05) lock tight to physical skin textures but may accumulate drift.\nHigher values (e.g. 0.25) snap strongly back to MediaPipe landmarks.")
+    node.addKnob(stiffness_knob)
+    stiffness_knob.setVisible(False)
     
     # Landmarks Section (Standard Trackers)
     node.addKnob(nuke.Text_Knob("divider_landmarks", "Select Landmarks to Track", ""))
@@ -165,7 +248,9 @@ def create_face_tracker_node():
     knob_changed_script = (
         "n = nuke.thisNode()\n"
         "k = nuke.thisKnob()\n"
-        "if k.name() in ['export_type', 'landmark_density']:\n"
+        "if k.name() == 'refine_smartvectors':\n"
+        "    n['anchor_stiffness'].setVisible(k.value())\n"
+        "elif k.name() in ['export_type', 'landmark_density']:\n"
         "    is_roto = (n['export_type'].value() == 'Roto Node (Masks)')\n"
         "    n['landmark_density'].setVisible(not is_roto)\n"
         "    if is_roto:\n"
@@ -263,7 +348,7 @@ def run_tracking_on_node(node):
 
     and generates the keyframed Tracker4 node.
     """
-    # 1. Pipeline Validation
+    # 1. Pipeline and Refinement Validation
     input_node = node.input(0)
     if not input_node:
         nuke.message("Please connect the Face Tracker node to an input node (e.g. Read node) first.")
@@ -274,6 +359,22 @@ def run_tracking_on_node(node):
         nuke.message("Could not find an upstream 'Read' node connected to this pipeline.\n"
                      "Please make sure your footage flows from a valid 'Read' node.")
         return False
+        
+    refine_enabled = node['refine_smartvectors'].value()
+    vector_node = None
+    u_channel = None
+    v_channel = None
+    if refine_enabled:
+        vector_node = node.input(1)
+        if not vector_node:
+            nuke.message("SmartVector refinement is enabled but no node is connected to the 'SmartVector' input.")
+            return False
+        # Validate channels (automatically scan for best vector channels)
+        u_channel, v_channel = find_vector_channels(vector_node)
+        if not u_channel or not v_channel:
+            nuke.message("The connected SmartVector node does not contain any recognizable vector channels.\n"
+                         "Expected layers like 'smartvector_fwd', 'smartvector', 'forward', or 'motion' containing .u/.v or .x/.y channels.")
+            return False
         
     # Retrieve resolved filename pattern (evaluates relative paths and TCL but keeps frame patterns like #### or %04d)
     try:
@@ -456,7 +557,11 @@ def run_tracking_on_node(node):
             match = re.search(r'PROGRESS:\s*(\d+)%', line)
             if match:
                 progress_val = int(match.group(1))
-                task.setProgress(progress_val)
+                if refine_enabled:
+                    mapped_progress = int(progress_val * 0.8)
+                else:
+                    mapped_progress = progress_val
+                task.setProgress(mapped_progress)
                 task.setMessage(f"Tracking face... frames {start_frame}-{end_frame} ({progress_val}%)")
         elif line.startswith("[INFO]"):
             task.setMessage(line)
@@ -471,11 +576,154 @@ def run_tracking_on_node(node):
         nuke.message(f"Backend process failed (Exit Code: {process.returncode}):\n\n{err_msg}")
         return False
         
-    # 5. Populate and connect standard Tracker4 node or Roto node
+    # 5. SmartVector refinement phase
+    if refine_enabled:
+        task.setMessage("Refining tracking coordinates with SmartVectors...")
+        try:
+            with open(output_json, "r") as f:
+                tracker_data = json.load(f)
+        except Exception as e:
+            nuke.message(f"Failed to read tracking JSON for refinement:\n{str(e)}")
+            return False
+            
+        success_refine = apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_channel, v_channel, task)
+        if not success_refine:
+            return False
+            
+        try:
+            with open(output_json, "w") as f:
+                json.dump(tracker_data, f, indent=2)
+        except Exception as e:
+            nuke.message(f"Failed to save refined JSON:\n{str(e)}")
+            return False
+            
+    # 6. Populate and connect standard Tracker4 node or Roto node
     if is_roto_mode:
         return generate_roto_node(node, output_json, width, height)
     else:
         return generate_tracker_node(node, output_json, width, height)
+
+
+def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_channel=None, v_channel=None, task=None):
+    """Applies the Spring-Anchor blending algorithm to refine MediaPipe landmark
+    coordinates using local motion vectors from the connected SmartVector node.
+    """
+    vector_node = node.input(1)
+    if not vector_node:
+        return False
+        
+    if not u_channel or not v_channel:
+        u_channel, v_channel = find_vector_channels(vector_node)
+        if not u_channel or not v_channel:
+            nuke.message("Could not auto-detect recognizable vector channels for refinement.")
+            return False
+        
+    w = node['anchor_stiffness'].value()
+    
+    # Store original frame to restore later
+    orig_frame = nuke.frame()
+    
+    total_frames = end_frame - start_frame + 1
+    previous_refined = {}
+    
+    # Initialize previous_refined at the first frame of tracking
+    first_frame_str = str(start_frame)
+    for track_name, frame_data in tracker_data.items():
+        if first_frame_str in frame_data:
+            val = frame_data[first_frame_str]
+            if isinstance(val[0], list):
+                # Roto group: list of points
+                previous_refined[track_name] = [list(pt) for pt in val]
+            else:
+                # Tracker point
+                previous_refined[track_name] = list(val)
+                
+    # Chronological loop
+    for f_idx, frame in enumerate(range(start_frame + 1, end_frame + 1)):
+        if task and task.isCancelled():
+            nuke.frame(orig_frame)
+            nuke.message("SmartVector refinement cancelled by user.")
+            return False
+            
+        # Evaluate upstream vectors at frame f-1 to compute motion to frame f
+        nuke.frame(frame - 1)
+        frame_str = str(frame)
+        
+        for track_name, frame_data in tracker_data.items():
+            if track_name not in previous_refined:
+                if frame_str in frame_data:
+                    val = frame_data[frame_str]
+                    if isinstance(val[0], list):
+                        previous_refined[track_name] = [list(pt) for pt in val]
+                    else:
+                        previous_refined[track_name] = list(val)
+                continue
+                
+            prev_val = previous_refined[track_name]
+            
+            if isinstance(prev_val[0], list):
+                # Roto group: list of points
+                refined_pts = []
+                mp_pts = frame_data.get(frame_str)
+                
+                for idx, pt in enumerate(prev_val):
+                    x_prev, y_prev = pt[0], pt[1]
+                    
+                    # Sample motion vectors with standard pixel center offset
+                    u = vector_node.sample(u_channel, x_prev + 0.5, y_prev + 0.5)
+                    v = vector_node.sample(v_channel, x_prev + 0.5, y_prev + 0.5)
+                    
+                    # Advection
+                    x_motion = x_prev + u
+                    y_motion = y_prev + v
+                    
+                    # Correction
+                    if mp_pts and idx < len(mp_pts):
+                        x_mp, y_mp = mp_pts[idx][0], mp_pts[idx][1]
+                        x_ref = (1.0 - w) * x_motion + w * x_mp
+                        y_ref = (1.0 - w) * y_motion + w * y_mp
+                    else:
+                        x_ref = x_motion
+                        y_ref = y_motion
+                        
+                    refined_pts.append([round(x_ref, 3), round(y_ref, 3)])
+                    
+                if frame_str in frame_data:
+                    frame_data[frame_str] = refined_pts
+                previous_refined[track_name] = refined_pts
+                
+            else:
+                # Tracker point
+                x_prev, y_prev = prev_val[0], prev_val[1]
+                
+                u = vector_node.sample(u_channel, x_prev + 0.5, y_prev + 0.5)
+                v = vector_node.sample(v_channel, x_prev + 0.5, y_prev + 0.5)
+                
+                x_motion = x_prev + u
+                y_motion = y_prev + v
+                
+                mp_pt = frame_data.get(frame_str)
+                if mp_pt:
+                    x_mp, y_mp = mp_pt[0], mp_pt[1]
+                    x_ref = (1.0 - w) * x_motion + w * x_mp
+                    y_ref = (1.0 - w) * y_motion + w * y_mp
+                else:
+                    x_ref = x_motion
+                    y_ref = y_motion
+                    
+                refined_pt = [round(x_ref, 3), round(y_ref, 3)]
+                
+                if frame_str in frame_data:
+                    frame_data[frame_str] = refined_pt
+                previous_refined[track_name] = refined_pt
+                
+        if task:
+            progress_pct = 80 + int((f_idx + 1) / float(total_frames) * 20)
+            task.setProgress(progress_pct)
+            task.setMessage(f"Refining coordinates... frame {frame} of {end_frame} ({progress_pct}%)")
+            
+    nuke.frame(orig_frame)
+    return True
 
 
 def generate_tracker_node(parent_node, json_path, width, height):
@@ -502,8 +750,10 @@ def generate_tracker_node(parent_node, json_path, width, height):
         
     parent_node.setSelected(True)
     
-    # Create the Tracker4 Node
-    tracker = nuke.createNode('Tracker4')
+    # Create the Tracker4 Node in the parent canvas context
+    parent_group = parent_node.parent()
+    with parent_group:
+        tracker = nuke.createNode('Tracker4')
     tracker.setName(f"Tracker_Face_{parent_node.name()}")
     
     # Define Tracker4 database columns
@@ -617,8 +867,10 @@ def generate_roto_node(parent_node, json_path, width, height):
         
     parent_node.setSelected(True)
     
-    # Create the Roto Node
-    roto_node = nuke.createNode('Roto')
+    # Create the Roto Node in the parent canvas context
+    parent_group = parent_node.parent()
+    with parent_group:
+        roto_node = nuke.createNode('Roto')
     roto_node.setName(f"Roto_Face_{parent_node.name()}")
     
     curves_knob = roto_node['curves']
