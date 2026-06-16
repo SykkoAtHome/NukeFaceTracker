@@ -1426,6 +1426,36 @@ def generate_tracker_node(parent_node, json_path, width, height):
     return True
 
 
+def _get_keyable_anim_point(shape_point, attr_names):
+    """Returns the first point-like attribute that supports Nuke position curves."""
+    for attr_name in attr_names:
+        try:
+            anim_point = getattr(shape_point, attr_name)
+        except Exception:
+            continue
+
+        if callable(getattr(anim_point, "getPositionAnimCurve", None)):
+            return anim_point
+
+    return None
+
+
+def _add_position_key(anim_point, frame, x_value, y_value):
+    x_curve = anim_point.getPositionAnimCurve(0, "")
+    y_curve = anim_point.getPositionAnimCurve(1, "")
+    x_curve.addKey(frame, x_value)
+    y_curve.addKey(frame, y_value)
+
+
+def _calculate_closed_bezier_tangent(points, idx, tension=0.25):
+    prev_coords = points[(idx - 1) % len(points)]
+    next_coords = points[(idx + 1) % len(points)]
+    return (
+        (next_coords[0] - prev_coords[0]) * tension,
+        (next_coords[1] - prev_coords[1]) * tension,
+    )
+
+
 def generate_roto_node(parent_node, json_path, width, height):
     """Loads JSON contour tracking results and generates a native, animated closed Roto node."""
     if not os.path.exists(json_path):
@@ -1553,34 +1583,38 @@ def generate_roto_node(parent_node, json_path, width, height):
                 anim_point = shape_point.center
                 
                 # Set coordinate keyframes using AnimCurve.addKey
-                x_curve = anim_point.getPositionAnimCurve(0, "")
-                y_curve = anim_point.getPositionAnimCurve(1, "")
-                x_curve.addKey(frame, coords[0])
-                y_curve.addKey(frame, coords[1])
+                _add_position_key(anim_point, frame, coords[0], coords[1])
+
+                feather_center = _get_keyable_anim_point(
+                    shape_point,
+                    ("featherCenter", "featherPoint", "feather")
+                )
+                if feather_center is not None:
+                    _add_position_key(feather_center, frame, coords[0], coords[1])
                 
                 # If Bezier is enabled and there are enough points, calculate smooth tangents
                 if bezier_enabled and num_points > 2:
-                    prev_coords = points[(idx - 1) % num_points]
-                    next_coords = points[(idx + 1) % num_points]
-                    
-                    dx = next_coords[0] - prev_coords[0]
-                    dy = next_coords[1] - prev_coords[1]
-                    
-                    tension = 0.25
-                    tx = dx * tension
-                    ty = dy * tension
+                    tx, ty = _calculate_closed_bezier_tangent(points, idx)
                     
                     # Left tangent handle (incoming)
-                    lt_x = shape_point.leftTangent.getPositionAnimCurve(0, "")
-                    lt_y = shape_point.leftTangent.getPositionAnimCurve(1, "")
-                    lt_x.addKey(frame, -tx)
-                    lt_y.addKey(frame, -ty)
+                    _add_position_key(shape_point.leftTangent, frame, -tx, -ty)
                     
                     # Right tangent handle (outgoing)
-                    rt_x = shape_point.rightTangent.getPositionAnimCurve(0, "")
-                    rt_y = shape_point.rightTangent.getPositionAnimCurve(1, "")
-                    rt_x.addKey(frame, tx)
-                    rt_y.addKey(frame, ty)
+                    _add_position_key(shape_point.rightTangent, frame, tx, ty)
+
+                    feather_left_tangent = _get_keyable_anim_point(
+                        shape_point,
+                        ("featherLeftTangent", "leftFeatherTangent", "featherLeft")
+                    )
+                    if feather_left_tangent is not None:
+                        _add_position_key(feather_left_tangent, frame, -tx, -ty)
+
+                    feather_right_tangent = _get_keyable_anim_point(
+                        shape_point,
+                        ("featherRightTangent", "rightFeatherTangent", "featherRight")
+                    )
+                    if feather_right_tangent is not None:
+                        _add_position_key(feather_right_tangent, frame, tx, ty)
                 
     # Force Nuke to evaluate and refresh the curves in the viewer
     curves_knob.changed()

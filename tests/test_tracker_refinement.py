@@ -26,6 +26,29 @@ class TestTrackerRefinement(unittest.TestCase):
     def setUp(self):
         # Reset mock calls on each test run
         mock_nuke.reset_mock()
+
+    class _FakeAnimCurve:
+        def __init__(self):
+            self.keys = []
+
+        def addKey(self, frame, value):
+            self.keys.append((frame, value))
+
+    class _FakeAnimPoint:
+        def __init__(self):
+            self.curves = [TestTrackerRefinement._FakeAnimCurve(), TestTrackerRefinement._FakeAnimCurve()]
+
+        def getPositionAnimCurve(self, dimension, _view):
+            return self.curves[dimension]
+
+    class _FakeControlPoint:
+        def __init__(self):
+            self.center = TestTrackerRefinement._FakeAnimPoint()
+            self.leftTangent = TestTrackerRefinement._FakeAnimPoint()
+            self.rightTangent = TestTrackerRefinement._FakeAnimPoint()
+            self.featherCenter = TestTrackerRefinement._FakeAnimPoint()
+            self.featherLeftTangent = TestTrackerRefinement._FakeAnimPoint()
+            self.featherRightTangent = TestTrackerRefinement._FakeAnimPoint()
         
     def test_apply_smartvector_refinement_tracker(self):
         """Test Spring-Anchor refinement for standard Tracker4 format (single point per landmark)."""
@@ -284,17 +307,8 @@ class TestTrackerRefinement(unittest.TestCase):
         sys.modules['nuke.rotopaint'] = mock_rp
         mock_nuke.rotopaint = mock_rp
         
-        # Setup shape control points mock
-        mock_center = MagicMock()
-        mock_lt = MagicMock()
-        mock_rt = MagicMock()
-        
         def create_anim_control_point(x, y):
-            cp = MagicMock()
-            cp.center = mock_center
-            cp.leftTangent = mock_lt
-            cp.rightTangent = mock_rt
-            return cp
+            return TestTrackerRefinement._FakeControlPoint()
             
         mock_rp.AnimControlPoint.side_effect = create_anim_control_point
         
@@ -318,11 +332,20 @@ class TestTrackerRefinement(unittest.TestCase):
             
             success = nuke_tracker.generate_roto_node(mock_parent, "dummy_roto.json", 1920, 1080)
             self.assertTrue(success)
-            
-            # Verify that getPositionAnimCurve was called on center, leftTangent, and rightTangent
-            mock_center.getPositionAnimCurve.assert_called()
-            mock_lt.getPositionAnimCurve.assert_called()
-            mock_rt.getPositionAnimCurve.assert_called()
+
+            # Main Bezier and feather Bezier must receive identical point/tangent keys.
+            for cp in appended_points:
+                self.assertEqual(cp.center.curves[0].keys, cp.featherCenter.curves[0].keys)
+                self.assertEqual(cp.center.curves[1].keys, cp.featherCenter.curves[1].keys)
+                self.assertEqual(cp.leftTangent.curves[0].keys, cp.featherLeftTangent.curves[0].keys)
+                self.assertEqual(cp.leftTangent.curves[1].keys, cp.featherLeftTangent.curves[1].keys)
+                self.assertEqual(cp.rightTangent.curves[0].keys, cp.featherRightTangent.curves[0].keys)
+                self.assertEqual(cp.rightTangent.curves[1].keys, cp.featherRightTangent.curves[1].keys)
+
+            self.assertEqual(appended_points[0].leftTangent.curves[0].keys, [(1, 12.5)])
+            self.assertEqual(appended_points[0].leftTangent.curves[1].keys, [(1, -7.5)])
+            self.assertEqual(appended_points[0].rightTangent.curves[0].keys, [(1, -12.5)])
+            self.assertEqual(appended_points[0].rightTangent.curves[1].keys, [(1, 7.5)])
 
     def test_generate_roto_node_bezier_disabled(self):
         """Test Roto node generation when 'roto_bezier' (Cusped Bezier) is True (checked = smooth Bezier disabled/cusped)."""
