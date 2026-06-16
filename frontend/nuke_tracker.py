@@ -496,7 +496,12 @@ def run_tracking_on_node(node):
         pass
 
     # 4. Set up temporary render directory for active image stream caching
-    temp_dir = tempfile.mkdtemp(prefix="nuke_facetracker_")
+    # Dynamically query Nuke's native temp directory to respect custom fast scratch disks
+    try:
+        nuke_temp = nuke.temp_dir()
+    except Exception:
+        nuke_temp = None
+    temp_dir = tempfile.mkdtemp(dir=nuke_temp, prefix="nuke_facetracker_")
     temp_file_pattern = os.path.join(temp_dir, "frame_%04d.jpg").replace("\\", "/")
     
     # Trigger Subprocess tracking with a native Nuke progress modal
