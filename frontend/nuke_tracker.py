@@ -1431,19 +1431,12 @@ def generate_roto_node(parent_node, json_path, width, height):
             for idx, coords in enumerate(points):
                 shape_point = shape[idx]
                 anim_point = shape_point.center
-                anim_feather = shape_point.featherCenter
                 
                 # Set coordinate keyframes using AnimCurve.addKey
                 x_curve = anim_point.getPositionAnimCurve(0, "")
                 y_curve = anim_point.getPositionAnimCurve(1, "")
                 x_curve.addKey(frame, coords[0])
                 y_curve.addKey(frame, coords[1])
-                
-                # Set identical feather spline coordinate keyframes
-                xf_curve = anim_feather.getPositionAnimCurve(0, "")
-                yf_curve = anim_feather.getPositionAnimCurve(1, "")
-                xf_curve.addKey(frame, coords[0])
-                yf_curve.addKey(frame, coords[1])
                 
                 # If Bezier is enabled and there are enough points, calculate smooth tangents
                 if bezier_enabled and num_points > 2:
@@ -1468,18 +1461,6 @@ def generate_roto_node(parent_node, json_path, width, height):
                     rt_y = shape_point.rightTangent.getPositionAnimCurve(1, "")
                     rt_x.addKey(frame, tx)
                     rt_y.addKey(frame, ty)
-                    
-                    # Align feather left tangent handle (incoming)
-                    flt_x = shape_point.featherLeftTangent.getPositionAnimCurve(0, "")
-                    flt_y = shape_point.featherLeftTangent.getPositionAnimCurve(1, "")
-                    flt_x.addKey(frame, -tx)
-                    flt_y.addKey(frame, -ty)
-                    
-                    # Align feather right tangent handle (outgoing)
-                    frt_x = shape_point.featherRightTangent.getPositionAnimCurve(0, "")
-                    frt_y = shape_point.featherRightTangent.getPositionAnimCurve(1, "")
-                    frt_x.addKey(frame, tx)
-                    frt_y.addKey(frame, ty)
                 
     # Force Nuke to evaluate and refresh the curves in the viewer
     curves_knob.changed()
