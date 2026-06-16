@@ -333,10 +333,11 @@ class TestTrackerRefinement(unittest.TestCase):
             success = nuke_tracker.generate_roto_node(mock_parent, "dummy_roto.json", 1920, 1080)
             self.assertTrue(success)
 
-            # Main Bezier and feather Bezier must receive identical point/tangent keys.
+            # Feather center is a relative offset in Nuke. It must stay at zero so the
+            # feather curve does not get pushed away from the main spline.
             for cp in appended_points:
-                self.assertEqual(cp.center.curves[0].keys, cp.featherCenter.curves[0].keys)
-                self.assertEqual(cp.center.curves[1].keys, cp.featherCenter.curves[1].keys)
+                self.assertEqual(cp.featherCenter.curves[0].keys, [(1, 0.0)])
+                self.assertEqual(cp.featherCenter.curves[1].keys, [(1, 0.0)])
                 self.assertEqual(cp.leftTangent.curves[0].keys, cp.featherLeftTangent.curves[0].keys)
                 self.assertEqual(cp.leftTangent.curves[1].keys, cp.featherLeftTangent.curves[1].keys)
                 self.assertEqual(cp.rightTangent.curves[0].keys, cp.featherRightTangent.curves[0].keys)

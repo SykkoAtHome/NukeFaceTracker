@@ -1593,7 +1593,9 @@ def generate_roto_node(parent_node, json_path, width, height):
                     ("featherCenter", "featherPoint", "feather")
                 )
                 if feather_center is not None:
-                    _add_position_key(feather_center, frame, coords[0], coords[1])
+                    # Nuke feather points are relative to the main control point.
+                    # Keep the feather edge aligned with the main spline by keying zero offset.
+                    _add_position_key(feather_center, frame, 0.0, 0.0)
 
                 # If Bezier is enabled and there are enough points, calculate smooth tangents
                 if is_closed and bezier_enabled and num_points > 2:
