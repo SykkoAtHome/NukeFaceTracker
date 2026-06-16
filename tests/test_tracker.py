@@ -162,5 +162,49 @@ class TestNukeFaceTracker(unittest.TestCase):
         self.assertTrue(set([250, 290, 305, 309, 392, 458]).issubset(set(left_nostril)))
         self.assertTrue(set([20, 60, 75, 79, 166, 238]).issubset(set(right_nostril)))
 
+    def test_merge_results_averaging_and_gap_patching(self):
+        """Test merge_results for landmarks and contours averaging and gap patching."""
+        forward = {
+            "Nose_Tip": {
+                "1": [10.0, 20.0],
+                "2": [12.0, 22.0]
+            },
+            "Lips_Outer": {
+                "1": [[1.0, 2.0], [3.0, 4.0]],
+                "2": [[5.0, 6.0], [7.0, 8.0]]
+            }
+        }
+        backward = {
+            "Nose_Tip": {
+                "2": [14.0, 24.0],
+                "3": [16.0, 26.0]
+            },
+            "Lips_Outer": {
+                "2": [[7.0, 8.0], [9.0, 10.0]],
+                "3": [[11.0, 12.0], [13.0, 14.0]]
+            }
+        }
+        
+        contours_to_track = {"Lips_Outer": [0, 1]}
+        landmarks_to_track = {"Nose_Tip": 4}
+        
+        merged = tracker_backend.merge_results(forward, backward, contours_to_track, landmarks_to_track)
+        
+        # Verify Nose_Tip
+        # Frame 1: Only in forward -> [10.0, 20.0]
+        self.assertEqual(merged["Nose_Tip"]["1"], [10.0, 20.0])
+        # Frame 2: In both -> average: (12+14)/2 = 13.0, (22+24)/2 = 23.0
+        self.assertEqual(merged["Nose_Tip"]["2"], [13.0, 23.0])
+        # Frame 3: Only in backward -> [16.0, 26.0]
+        self.assertEqual(merged["Nose_Tip"]["3"], [16.0, 26.0])
+        
+        # Verify Lips_Outer
+        # Frame 1: Only forward -> [[1.0, 2.0], [3.0, 4.0]]
+        self.assertEqual(merged["Lips_Outer"]["1"], [[1.0, 2.0], [3.0, 4.0]])
+        # Frame 2: In both -> average of matching points
+        self.assertEqual(merged["Lips_Outer"]["2"], [[6.0, 7.0], [8.0, 9.0]])
+        # Frame 3: Only backward -> [[11.0, 12.0], [13.0, 14.0]]
+        self.assertEqual(merged["Lips_Outer"]["3"], [[11.0, 12.0], [13.0, 14.0]])
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,11 @@ try:
 except ImportError:
     landmarks_config = None
 
+try:
+    import tracker_backend
+except ImportError:
+    tracker_backend = None
+
 
 def find_upstream_read(node):
     """Recursively traverses upstream following the active image pipeline to find the
@@ -189,7 +194,7 @@ def create_face_tracker_node():
         output.setInput(0, input_source)
     
     # 1. Tracking Settings Tab
-    tracking_tab = nuke.Tab_Knob("tracking_tab", "Tracking")
+    tracking_tab = nuke.Tab_Knob("tracking_tab", "Analyze Face")
     node.addKnob(tracking_tab)
     
     # Resolve initial ranges based on selected nodes or project
@@ -234,6 +239,11 @@ def create_face_tracker_node():
     
     # Refinement Section
     node.addKnob(nuke.Text_Knob("divider_refine", "Refinement", ""))
+    
+    backtrack_knob = nuke.Boolean_Knob("backtrack", "Backtrack", False)
+    backtrack_knob.setTooltip("Runs tracking in both forward and backward directions, averaging the detected coordinates. This also helps patch frames where tracking might have failed in one of the directions.")
+    node.addKnob(backtrack_knob)
+    
     refine_knob = nuke.Boolean_Knob("refine_smartvectors", "Refine with SmartVectors", False)
     refine_knob.setTooltip("Enables high-precision local refinement of tracking coordinates using motion vectors from the 'SmartVector' input.")
     node.addKnob(refine_knob)
@@ -439,6 +449,7 @@ def run_tracking_on_node(node):
         return False
         
     refine_enabled = node['refine_smartvectors'].value()
+    backtrack_enabled = node['backtrack'].value() if 'backtrack' in node.knobs() else False
     vector_node = None
     u_channel = None
     v_channel = None
@@ -546,6 +557,8 @@ def run_tracking_on_node(node):
     task = nuke.ProgressTask("MediaPipe Face Tracker")
     task.setMessage("Rendering active image stream to temporary cache...")
     
+    output_fwd = None
+    output_bwd = None
     write_node = None
     success = False
     
@@ -570,12 +583,15 @@ def run_tracking_on_node(node):
         # Synchronously execute the temporary render in Nuke
         nuke.execute(write_node, start_frame, end_frame)
         
-        # Setup subprocess command referencing the temporary JPEGs
-        cmd = [
+        # Setup output paths for dual-pass tracking if backtrack is enabled
+        output_fwd = output_json.replace(".json", "_fwd.json")
+        output_bwd = output_json.replace(".json", "_bwd.json")
+        
+        # Setup base subprocess command referencing the temporary JPEGs
+        base_cmd = [
             python_exe,
             backend_script,
             "--input", temp_file_pattern,
-            "--output", output_json,
             "--start", str(start_frame),
             "--end", str(end_frame),
             "--width", str(width),
@@ -588,6 +604,34 @@ def run_tracking_on_node(node):
             "--min-track-confidence", str(min_track_conf)
         ]
         
+        # Compile list of tracking passes to run
+        passes_to_run = []
+        if backtrack_enabled:
+            weight = 0.4 if refine_enabled else 0.5
+            passes_to_run.append({
+                "cmd": base_cmd + ["--output", output_fwd],
+                "name": "Forward",
+                "weight": weight,
+                "offset": 0.0,
+                "output": output_fwd
+            })
+            passes_to_run.append({
+                "cmd": base_cmd + ["--output", output_bwd, "--backward"],
+                "name": "Backward",
+                "weight": weight,
+                "offset": weight,
+                "output": output_bwd
+            })
+        else:
+            weight = 0.8 if refine_enabled else 1.0
+            passes_to_run.append({
+                "cmd": base_cmd + ["--output", output_json],
+                "name": "Forward",
+                "weight": weight,
+                "offset": 0.0,
+                "output": output_json
+            })
+            
         # Hide console terminal window on Windows platforms
         startupinfo = None
         if sys.platform == "win32":
@@ -595,62 +639,112 @@ def run_tracking_on_node(node):
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startupinfo.wShowWindow = 0 # SW_HIDE
             
-        task.setMessage("Initializing face detection engine...")
-        
-        try:
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                startupinfo=startupinfo,
-                bufsize=1
-            )
-        except Exception as e:
-            nuke.message(f"Failed to start backend subprocess:\n{str(e)}")
-            return False
+        # Execute each pass sequentially
+        for p_idx, p_info in enumerate(passes_to_run):
+            task.setMessage(f"Initializing face detection engine ({p_info['name']} pass)...")
             
-        error_logs = []
-        
-        while True:
-            if task.isCancelled():
-                process.terminate()
-                nuke.message("Face tracking cancelled by user.")
+            try:
+                process = subprocess.Popen(
+                    p_info["cmd"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    universal_newlines=True,
+                    startupinfo=startupinfo,
+                    bufsize=1
+                )
+            except Exception as e:
+                nuke.message(f"Failed to start backend subprocess for {p_info['name']} pass:\n{str(e)}")
                 return False
                 
-            line = process.stdout.readline()
-            if not line:
-                break
-                
-            line = line.strip()
-            print(f"[MediaPipe Backend] {line}")
+            error_logs = []
+            pass_success = False
             
-            if "[ERROR]" in line or "Error:" in line or "Traceback" in line:
-                error_logs.append(line)
+            while True:
+                if task.isCancelled():
+                    process.terminate()
+                    nuke.message("Face tracking cancelled by user.")
+                    return False
+                    
+                line = process.stdout.readline()
+                if not line:
+                    break
+                    
+                line = line.strip()
+                print(f"[MediaPipe Backend {p_info['name']}] {line}")
                 
-            if line.startswith("PROGRESS:"):
-                match = re.search(r'PROGRESS:\s*(\d+)%', line)
-                if match:
-                    progress_val = int(match.group(1))
-                    if refine_enabled:
-                        mapped_progress = int(progress_val * 0.8)
-                    else:
-                        mapped_progress = progress_val
-                    task.setProgress(mapped_progress)
-                    task.setMessage(f"Tracking face... frames {start_frame}-{end_frame} ({progress_val}%)")
-            elif line.startswith("[INFO]"):
-                task.setMessage(line)
-            elif line.startswith("[SUCCESS]"):
-                success = True
-                task.setMessage(line)
+                if "[ERROR]" in line or "Error:" in line or "Traceback" in line:
+                    error_logs.append(line)
+                    
+                if line.startswith("PROGRESS:"):
+                    match = re.search(r'PROGRESS:\s*(\d+)%', line)
+                    if match:
+                        progress_val = int(match.group(1))
+                        mapped_progress = int(p_info["offset"] * 100 + progress_val * p_info["weight"])
+                        task.setProgress(mapped_progress)
+                        task.setMessage(f"Tracking face ({p_info['name']})... frames {start_frame}-{end_frame} ({progress_val}%)")
+                elif line.startswith("[INFO]"):
+                    task.setMessage(line)
+                elif line.startswith("[SUCCESS]"):
+                    pass_success = True
+                    task.setMessage(line)
+                    
+            process.wait()
+            
+            if process.returncode != 0 or not pass_success:
+                err_msg = "\n".join(error_logs[-10:]) if error_logs else "Unknown error occurred in the background process."
+                nuke.message(f"Backend {p_info['name']} pass failed (Exit Code: {process.returncode}):\n\n{err_msg}")
+                return False
                 
-        process.wait()
+        # If backtracking was enabled, merge the two JSON outputs
+        if backtrack_enabled:
+            task.setMessage("Merging forward and backward tracking results...")
+            
+            try:
+                with open(output_fwd, "r") as f:
+                    fwd_data = json.load(f)
+            except Exception as e:
+                nuke.message(f"Failed to read forward tracking JSON for merging:\n{str(e)}")
+                return False
+                
+            try:
+                with open(output_bwd, "r") as f:
+                    bwd_data = json.load(f)
+            except Exception as e:
+                nuke.message(f"Failed to read backward tracking JSON for merging:\n{str(e)}")
+                return False
+                
+            if not tracker_backend or not landmarks_config:
+                nuke.message("Failed to reference backend modules (tracker_backend or landmarks_config) for merging.")
+                return False
+                
+            try:
+                selected_landmarks_list = [name.strip() for name in landmarks_str.split(",") if name.strip()]
+                contours_to_track = {name: landmarks_config.CONTOUR_GROUPS[name] for name in selected_landmarks_list if name in landmarks_config.CONTOUR_GROUPS}
+                individual_names = [name for name in selected_landmarks_list if name not in landmarks_config.CONTOUR_GROUPS]
+                landmarks_to_track = landmarks_config.get_landmarks_by_names(individual_names)
+                
+                merged_data = tracker_backend.merge_results(
+                    fwd_data,
+                    bwd_data,
+                    contours_to_track,
+                    landmarks_to_track
+                )
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                nuke.message(f"Error during results merging:\n{str(e)}")
+                return False
+                
+            try:
+                os.makedirs(os.path.dirname(output_json), exist_ok=True)
+                with open(output_json, "w") as f:
+                    json.dump(merged_data, f, indent=2)
+            except Exception as e:
+                nuke.message(f"Failed to save merged tracking JSON:\n{str(e)}")
+                return False
+                
+        success = True
         
-        if process.returncode != 0 or not success:
-            err_msg = "\n".join(error_logs[-10:]) if error_logs else "Unknown error occurred in the background process."
-            nuke.message(f"Backend process failed (Exit Code: {process.returncode}):\n\n{err_msg}")
-            return False
-            
         # 5. SmartVector refinement phase
         if refine_enabled:
             task.setMessage("Refining tracking coordinates with SmartVectors...")
@@ -685,6 +779,14 @@ def run_tracking_on_node(node):
             shutil.rmtree(temp_dir)
         except Exception:
             pass
+            
+        # Cleanup temporary forward/backward JSON files if they exist
+        for tmp_file in [output_fwd, output_bwd]:
+            if tmp_file and os.path.exists(tmp_file):
+                try:
+                    os.remove(tmp_file)
+                except Exception:
+                    pass
             
     # 6. Success message - printed to the script editor to avoid blocking modal dialogs
     print("[NukeFaceTracker] Face tracking completed successfully! Switch to 'Tracker' or 'Roto' tab to export.")
