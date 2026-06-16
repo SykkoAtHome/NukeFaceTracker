@@ -1,0 +1,16 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Temp tracking data
+temp_tracker_data.json
+
+# Large MediaPipe model binary (automatically downloaded by backend/model_downloader.py)
+backend/face_landmarker.task
