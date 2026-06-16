@@ -322,27 +322,18 @@ def create_face_tracker_node():
     divider_roto = nuke.Text_Knob("divider_roto_landmarks", "Select Contours for Roto Splines", "")
     node.addKnob(divider_roto)
     
-    # Helper to create HTML monospace labels with padding for grid alignment
-    def make_aligned_label(text, pad_to=0):
-        if pad_to > 0:
-            spaces_needed = pad_to - len(text)
-            padded = text + "&nbsp;" * spaces_needed
-        else:
-            padded = text
-        return f"<font face='monospace'>{padded}</font>"
-
-    roto_oval = nuke.Boolean_Knob("roto_oval", make_aligned_label("Face Oval (36 pts)", 25), True)
-    roto_nose_bridge = nuke.Boolean_Knob("roto_nose_bridge", make_aligned_label("Nose Bridge (5 pts)"), False)
-    roto_left_nostril = nuke.Boolean_Knob("roto_left_nostril", make_aligned_label("Left Nostril (6 pts)", 25), False)
-    roto_right_nostril = nuke.Boolean_Knob("roto_right_nostril", make_aligned_label("Right Nostril (6 pts)"), False)
-    roto_lips_outer = nuke.Boolean_Knob("roto_lips_outer", make_aligned_label("Lips Outer (20 pts)", 25), True)
-    roto_lips_inner = nuke.Boolean_Knob("roto_lips_inner", make_aligned_label("Lips Inner (20 pts)"), False)
-    roto_left_eye = nuke.Boolean_Knob("roto_left_eye", make_aligned_label("Left Eye (16 pts)", 25), False)
-    roto_right_eye = nuke.Boolean_Knob("roto_right_eye", make_aligned_label("Right Eye (16 pts)"), False)
-    roto_left_iris = nuke.Boolean_Knob("roto_left_iris", make_aligned_label("Left Iris (4 pts)", 25), False)
-    roto_right_iris = nuke.Boolean_Knob("roto_right_iris", make_aligned_label("Right Iris (4 pts)"), False)
-    roto_left_eyebrow = nuke.Boolean_Knob("roto_left_eyebrow", make_aligned_label("Left Eyebrow (10 pts)", 25), False)
-    roto_right_eyebrow = nuke.Boolean_Knob("roto_right_eyebrow", make_aligned_label("Right Eyebrow (10 pts)"), False)
+    roto_oval = nuke.Boolean_Knob("roto_oval", "Face Oval (36 pts)       ", True)
+    roto_nose_bridge = nuke.Boolean_Knob("roto_nose_bridge", "Nose Bridge (5 pts)", False)
+    roto_left_nostril = nuke.Boolean_Knob("roto_left_nostril", "Left Nostril (6 pts)     ", False)
+    roto_right_nostril = nuke.Boolean_Knob("roto_right_nostril", "Right Nostril (6 pts)", False)
+    roto_lips_outer = nuke.Boolean_Knob("roto_lips_outer", "Lips Outer (20 pts)      ", True)
+    roto_lips_inner = nuke.Boolean_Knob("roto_lips_inner", "Lips Inner (20 pts)", False)
+    roto_left_eye = nuke.Boolean_Knob("roto_left_eye", "Left Eye (16 pts)        ", False)
+    roto_right_eye = nuke.Boolean_Knob("roto_right_eye", "Right Eye (16 pts)", False)
+    roto_left_iris = nuke.Boolean_Knob("roto_left_iris", "Left Iris (4 pts)          ", False)
+    roto_right_iris = nuke.Boolean_Knob("roto_right_iris", "Right Iris (4 pts)", False)
+    roto_left_eyebrow = nuke.Boolean_Knob("roto_left_eyebrow", "Left Eyebrow (10 pts)   ", False)
+    roto_right_eyebrow = nuke.Boolean_Knob("roto_right_eyebrow", "Right Eyebrow (10 pts)", False)
     
     # Configure 2x6 grid layout (Column 1 starts line, Column 2 clears startline)
     roto_oval.setFlag(nuke.STARTLINE)
