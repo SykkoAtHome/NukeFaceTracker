@@ -583,8 +583,10 @@ def generate_roto_node(parent_node, json_path, width, height):
                 anim_point = shape_point.center
                 
                 # Set coordinate keyframes using AnimCurve.addKey
-                anim_point.x.addKey(frame, coords[0])
-                anim_point.y.addKey(frame, coords[1])
+                x_curve = anim_point.getPositionAnimCurve(0, "")
+                y_curve = anim_point.getPositionAnimCurve(1, "")
+                x_curve.addKey(frame, coords[0])
+                y_curve.addKey(frame, coords[1])
                 
     # Force Nuke to evaluate and refresh the curves in the viewer
     curves_knob.changed()
