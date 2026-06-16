@@ -606,6 +606,43 @@ def run_tracking_on_node(node):
         return generate_tracker_node(node, output_json, width, height)
 
 
+def get_landmarks_bbox(tracker_data, frame, width, height, padding=50):
+    """Calculates the bounding box [x_min, y_min, x_max, y_max] of all landmarks
+    on a given frame, clamped to the image dimensions with a safety padding.
+    """
+    frame_str = str(frame)
+    xs = []
+    ys = []
+    for track_name, frame_data in tracker_data.items():
+        val = frame_data.get(frame_str)
+        if val:
+            if isinstance(val[0], list):
+                for pt in val:
+                    xs.append(pt[0])
+                    ys.append(pt[1])
+            else:
+                xs.append(val[0])
+                ys.append(val[1])
+                
+    if not xs or not ys:
+        return [0, 0, width, height]
+        
+    x_min = max(0, int(min(xs) - padding))
+    y_min = max(0, int(min(ys) - padding))
+    x_max = min(width, int(max(xs) + padding))
+    y_max = min(height, int(max(ys) + padding))
+    
+    # Handle collapsed or zero-size bbox
+    if x_min >= x_max:
+        x_min = max(0, x_min - 10)
+        x_max = min(width, x_max + 10)
+    if y_min >= y_max:
+        y_min = max(0, y_min - 10)
+        y_max = min(height, y_max + 10)
+        
+    return [x_min, y_min, x_max, y_max]
+
+
 def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_channel=None, v_channel=None, task=None):
     """Applies the Spring-Anchor blending algorithm to refine MediaPipe landmark
     coordinates using local motion vectors from the connected SmartVector node.
@@ -622,15 +659,33 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
         
     w = node['anchor_stiffness'].value()
     
-    # Create temporary CurveTool to force evaluation of the upstream pipeline at each frame
+    # Determine format dimensions defensively
+    try:
+        width = vector_node.format().width()
+        height = vector_node.format().height()
+    except Exception:
+        try:
+            width = nuke.root().format().width()
+            height = nuke.root().format().height()
+        except Exception:
+            width = 1920
+            height = 1080
+    
+    # Create temporary in-memory CurveTool to force evaluation of the upstream pipeline at each frame.
+    # To prevent the node from appearing in the user's Node Graph (DAG) and causing visual confusion,
+    # we create it INSIDE the FaceTracker group's internal DAG context (using 'with node:')
+    # and connect it to the internal "SmartVector" Input node.
     force_node = None
     try:
-        with node.parent():
-            force_node = nuke.createNode("CurveTool", inpanel=False)
-            force_node.setInput(0, vector_node)
-            force_node["ROI"].setValue([0, 0, 1, 1]) # Smallest ROI for ultra-fast performance
+        with node:
+            internal_vector_node = node.node("SmartVector")
+            if not internal_vector_node:
+                internal_vector_node = vector_node
+            force_node = nuke.nodes.CurveTool()
+            force_node.setInput(0, internal_vector_node)
+            force_node["ROI"].setValue([0, 0, width, height])
     except Exception as e:
-        print(f"[SmartVector Refine] Warning: Failed to create CurveTool force-evaluation node: {str(e)}")
+        print(f"[SmartVector Refine] Warning: Failed to create hidden in-memory CurveTool: {str(e)}")
     
     # Store original frame to restore later
     orig_frame = nuke.frame()
@@ -665,6 +720,9 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
         # Force evaluate upstream vector node at frame f-1
         if force_node:
             try:
+                # Calculate dynamic bounding box of all landmarks on frame f-1 to restrict evaluation area
+                bbox = get_landmarks_bbox(tracker_data, frame - 1, width, height)
+                force_node["ROI"].setValue(bbox)
                 nuke.execute(force_node, frame - 1, frame - 1)
             except Exception as e:
                 pass
