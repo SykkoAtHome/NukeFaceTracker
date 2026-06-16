@@ -306,6 +306,9 @@ def create_face_tracker_node():
     )
     node['knobChanged'].setValue(knob_changed_script)
     
+    # Force the first tab ('Tracking') to be the default active tab on creation
+    node.setTab(0)
+    
     return node
 
 
