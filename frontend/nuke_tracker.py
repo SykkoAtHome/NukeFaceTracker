@@ -161,8 +161,12 @@ def run_tracking_on_node(node):
                      "Please make sure your footage flows from a valid 'Read' node.")
         return False
         
-    # Evaluate file path (resolves Nuke relative or project expressions automatically)
-    input_path = read_node['file'].evaluate()
+    # Retrieve resolved filename pattern (evaluates relative paths and TCL but keeps frame patterns like #### or %04d)
+    try:
+        input_path = nuke.filename(read_node)
+    except Exception:
+        input_path = read_node['file'].value()
+        
     if not input_path:
         nuke.message("The upstream Read node does not contain a valid file path.")
         return False
