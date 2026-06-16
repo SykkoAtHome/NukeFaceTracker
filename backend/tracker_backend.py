@@ -156,8 +156,11 @@ def main():
         
         # Perform inference
         if run_mode == vision.RunningMode.VIDEO:
-            # Generate a monotonic timestamp in milliseconds based on project FPS and frame number
-            timestamp_ms = int(frame_num * 1000.0 / fps)
+            # Generate a monotonic timestamp in milliseconds based on the loop index (idx).
+            # This ensures that timestamps always start exactly at 0, are strictly non-negative, and
+            # monotonically increase, even if the user tracks negative frame ranges (common in VFX)
+            # or custom non-zero start frames.
+            timestamp_ms = int(idx * 1000.0 / fps)
             detection_result = detector.detect_for_video(mp_image, timestamp_ms)
         else:
             detection_result = detector.detect(mp_image)
