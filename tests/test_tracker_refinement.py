@@ -149,6 +149,62 @@ class TestTrackerRefinement(unittest.TestCase):
         self.assertAlmostEqual(refined_coords_2[0], 31.2, places=3)
         self.assertAlmostEqual(refined_coords_2[1], 42.8, places=3)
 
+    def test_generate_tracker_node_selected_landmarks(self):
+        """Test selected landmarks resolution for generate_tracker_node under Sparse, Dense, and Full configurations."""
+        import json
+        
+        # 1. Mock parent_node with a side_dict for knob values
+        mock_parent = MagicMock()
+        mock_parent.name.return_value = "FaceTracker1"
+        mock_parent.parent.return_value = MagicMock()
+        
+        # Helper to setup mock knob values
+        def set_knobs(density_val, track_nose, track_eyes, track_eyebrows, track_mouth, track_contour):
+            knobs = {
+                'landmark_density': MagicMock(value=lambda: density_val),
+                'track_nose': MagicMock(value=lambda: track_nose),
+                'track_eyes': MagicMock(value=lambda: track_eyes),
+                'track_eyebrows': MagicMock(value=lambda: track_eyebrows),
+                'track_mouth': MagicMock(value=lambda: track_mouth),
+                'track_contour': MagicMock(value=lambda: track_contour),
+                'export_t': MagicMock(value=lambda: True),
+                'export_r': MagicMock(value=lambda: False),
+                'export_s': MagicMock(value=lambda: False),
+            }
+            mock_parent.__getitem__.side_effect = lambda key: knobs[key]
+            
+        # 2. Mock open/json loading of files so generate_tracker_node reads our dummy tracker data
+        dummy_data = {
+            "Nose_Tip": {"1": [10.0, 20.0]},
+            "Face_Oval_0": {"1": [30.0, 40.0]},
+            "Left_Eye_0": {"1": [50.0, 60.0]},
+            "Mesh_0": {"1": [70.0, 80.0]},
+        }
+        
+        # Also mock nuke.createNode to avoid creating actual Nuke nodes, and mock nuke.allNodes
+        mock_nuke.allNodes.return_value = []
+        mock_tracker = MagicMock()
+        mock_nuke.createNode.return_value = mock_tracker
+        
+        with patch("os.path.exists", return_value=True), \
+             patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(dummy_data))):
+            
+            # Case A: Sparse, Nose selected
+            set_knobs("Sparse", True, False, False, False, False)
+            success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
+            self.assertTrue(success)
+            
+            # Case B: Dense, Eyes and Nose selected
+            # Under Dense: track_eyes maps to Left_Eye_i and Right_Eye_i; track_nose maps to standard Nose landmarks.
+            set_knobs("Dense", True, True, False, False, False)
+            success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
+            self.assertTrue(success)
+            
+            # Case C: Full mode
+            set_knobs("Full", False, False, False, False, False)
+            success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
+            self.assertTrue(success)
+
 
 if __name__ == "__main__":
     unittest.main()

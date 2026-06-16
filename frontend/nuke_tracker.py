@@ -234,10 +234,6 @@ def create_face_tracker_node():
     node.addKnob(track_mouth)
     node.addKnob(track_contour)
     
-    info_dense_tracker = nuke.Text_Knob("info_dense_tracker", "", "<span style='color:#ffa500'><b>Dense Tracking:</b> Individual point trackers will be created for the contour groups selected on the 'Roto' tab.</span>")
-    node.addKnob(info_dense_tracker)
-    info_dense_tracker.setVisible(False)
-    
     info_full_mesh = nuke.Text_Knob("info_full_mesh", "", "<span style='color:#ffa500'><b>Warning:</b> Tracking all 468 landmarks will create 468 point tracks.<br>This may slow down Foundry Nuke's viewport and node properties panel.</span>")
     node.addKnob(info_full_mesh)
     info_full_mesh.setVisible(False)
@@ -302,16 +298,7 @@ def create_face_tracker_node():
         "    n['anchor_stiffness'].setVisible(k.value())\n"
         "elif k.name() == 'landmark_density':\n"
         "    density = k.value()\n"
-        "    is_sparse = ('Sparse' in density)\n"
         "    is_full = ('Full' in density)\n"
-        "    is_dense = ('Dense' in density)\n"
-        "    n['divider_landmarks'].setVisible(is_sparse)\n"
-        "    n['track_nose'].setVisible(is_sparse)\n"
-        "    n['track_eyes'].setVisible(is_sparse)\n"
-        "    n['track_eyebrows'].setVisible(is_sparse)\n"
-        "    n['track_mouth'].setVisible(is_sparse)\n"
-        "    n['track_contour'].setVisible(is_sparse)\n"
-        "    n['info_dense_tracker'].setVisible(is_dense)\n"
         "    n['info_full_mesh'].setVisible(is_full)\n"
     )
     node['knobChanged'].setValue(knob_changed_script)
@@ -795,20 +782,19 @@ def generate_tracker_node(parent_node, json_path, width, height):
         if parent_node['track_contour'].value():
             selected_landmarks.extend(landmarks_config.LANDMARK_GROUPS["Face Shape"].keys())
     elif "Dense" in density:
-        if parent_node['roto_oval'].value():
-            selected_landmarks.extend([f"Face_Oval_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Face_Oval"]))])
-        if parent_node['roto_lips_outer'].value():
-            selected_landmarks.extend([f"Lips_Outer_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Outer"]))])
-        if parent_node['roto_lips_inner'].value():
-            selected_landmarks.extend([f"Lips_Inner_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Inner"]))])
-        if parent_node['roto_left_eye'].value():
+        if parent_node['track_nose'].value():
+            selected_landmarks.extend(landmarks_config.LANDMARK_GROUPS["Nose"].keys())
+        if parent_node['track_eyes'].value():
             selected_landmarks.extend([f"Left_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eye"]))])
-        if parent_node['roto_right_eye'].value():
             selected_landmarks.extend([f"Right_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eye"]))])
-        if parent_node['roto_left_eyebrow'].value():
+        if parent_node['track_eyebrows'].value():
             selected_landmarks.extend([f"Left_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eyebrow"]))])
-        if parent_node['roto_right_eyebrow'].value():
             selected_landmarks.extend([f"Right_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eyebrow"]))])
+        if parent_node['track_mouth'].value():
+            selected_landmarks.extend([f"Lips_Outer_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Outer"]))])
+            selected_landmarks.extend([f"Lips_Inner_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Inner"]))])
+        if parent_node['track_contour'].value():
+            selected_landmarks.extend([f"Face_Oval_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Face_Oval"]))])
     elif "Full" in density:
         selected_landmarks.extend([f"Mesh_{i}" for i in range(468)])
 
