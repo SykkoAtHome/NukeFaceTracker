@@ -202,7 +202,7 @@ def create_face_tracker_node():
     node.addKnob(nuke.Text_Knob("divider_action", "", ""))
     
     # Main action button
-    track_btn = nuke.PyScript_Knob("track_btn", "<b>Track Face</b>", "import nuke_tracker; nuke_tracker.run_tracking_on_node(nuke.thisNode())")
+    track_btn = nuke.PyScript_Knob("track_btn", "Track Face", "import nuke_tracker; nuke_tracker.run_tracking_on_node(nuke.thisNode())")
     track_btn.setFlag(nuke.STARTLINE)
     node.addKnob(track_btn)
     
@@ -244,7 +244,7 @@ def create_face_tracker_node():
     
     node.addKnob(nuke.Text_Knob("divider_tracker_action", "", ""))
     
-    create_tracker_btn = nuke.PyScript_Knob("create_tracker_btn", "<b>Export Tracker</b>", "import nuke_tracker; nuke_tracker.generate_tracker_node_from_panel(nuke.thisNode())")
+    create_tracker_btn = nuke.PyScript_Knob("create_tracker_btn", "Export Tracker", "import nuke_tracker; nuke_tracker.generate_tracker_node_from_panel(nuke.thisNode())")
     create_tracker_btn.setFlag(nuke.STARTLINE)
     node.addKnob(create_tracker_btn)
     
@@ -280,7 +280,7 @@ def create_face_tracker_node():
     
     node.addKnob(nuke.Text_Knob("divider_roto_action", "", ""))
     
-    create_roto_btn = nuke.PyScript_Knob("create_roto_btn", "<b>Export Roto</b>", "import nuke_tracker; nuke_tracker.generate_roto_node_from_panel(nuke.thisNode())")
+    create_roto_btn = nuke.PyScript_Knob("create_roto_btn", "Export Roto", "import nuke_tracker; nuke_tracker.generate_roto_node_from_panel(nuke.thisNode())")
     create_roto_btn.setFlag(nuke.STARTLINE)
     node.addKnob(create_roto_btn)
     
