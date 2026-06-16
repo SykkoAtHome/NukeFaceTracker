@@ -77,8 +77,10 @@ def find_vector_channels(node):
                 lower_layer = layer.lower()
                 if 'smartvector' in lower_layer:
                     score = 100
-                    # Give higher preference to fwd over bwd
-                    if 'fwd' in lower_layer:
+                    # Give higher preference to f01 or f1 (frame distance 1) over larger distances
+                    if '_f01' in lower_layer or '_f1' in lower_layer:
+                        score += 20
+                    elif 'fwd' in lower_layer:
                         score += 10
                 elif 'forward' in lower_layer:
                     score = 50
@@ -620,6 +622,16 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
         
     w = node['anchor_stiffness'].value()
     
+    # Create temporary CurveTool to force evaluation of the upstream pipeline at each frame
+    force_node = None
+    try:
+        with node.parent():
+            force_node = nuke.createNode("CurveTool", inpanel=False)
+            force_node.setInput(0, vector_node)
+            force_node["ROI"].setValue([0, 0, 1, 1]) # Smallest ROI for ultra-fast performance
+    except Exception as e:
+        print(f"[SmartVector Refine] Warning: Failed to create CurveTool force-evaluation node: {str(e)}")
+    
     # Store original frame to restore later
     orig_frame = nuke.frame()
     
@@ -641,9 +653,21 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
     # Chronological loop
     for f_idx, frame in enumerate(range(start_frame + 1, end_frame + 1)):
         if task and task.isCancelled():
+            if force_node:
+                try:
+                    nuke.delete(force_node)
+                except Exception:
+                    pass
             nuke.frame(orig_frame)
             nuke.message("SmartVector refinement cancelled by user.")
             return False
+            
+        # Force evaluate upstream vector node at frame f-1
+        if force_node:
+            try:
+                nuke.execute(force_node, frame - 1, frame - 1)
+            except Exception as e:
+                pass
             
         # Evaluate upstream vectors at frame f-1 to compute motion to frame f
         nuke.frame(frame - 1)
@@ -673,6 +697,9 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
                     u = vector_node.sample(u_channel, x_prev + 0.5, y_prev + 0.5)
                     v = vector_node.sample(v_channel, x_prev + 0.5, y_prev + 0.5)
                     
+                    if frame < start_frame + 6 and idx == 0:
+                        print(f"[SmartVector Refine] Frame {frame} - Roto '{track_name}' sampled motion: ({u:.4f}, {v:.4f})")
+                    
                     # Advection
                     x_motion = x_prev + u
                     y_motion = y_prev + v
@@ -699,6 +726,9 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
                 u = vector_node.sample(u_channel, x_prev + 0.5, y_prev + 0.5)
                 v = vector_node.sample(v_channel, x_prev + 0.5, y_prev + 0.5)
                 
+                if frame < start_frame + 6:
+                    print(f"[SmartVector Refine] Frame {frame} - Tracker '{track_name}' sampled motion: ({u:.4f}, {v:.4f})")
+                
                 x_motion = x_prev + u
                 y_motion = y_prev + v
                 
@@ -721,6 +751,13 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
             progress_pct = 80 + int((f_idx + 1) / float(total_frames) * 20)
             task.setProgress(progress_pct)
             task.setMessage(f"Refining coordinates... frame {frame} of {end_frame} ({progress_pct}%)")
+            
+    # Cleanup temporary force node
+    if force_node:
+        try:
+            nuke.delete(force_node)
+        except Exception:
+            pass
             
     nuke.frame(orig_frame)
     return True
