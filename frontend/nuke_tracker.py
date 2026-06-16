@@ -335,32 +335,51 @@ def create_face_tracker_node():
     roto_left_eyebrow = nuke.Boolean_Knob("roto_left_eyebrow", "Left Eyebrow (10 pts)", False)
     roto_right_eyebrow = nuke.Boolean_Knob("roto_right_eyebrow", "Right Eyebrow (10 pts)", False)
     
-    roto_nose_bridge.setFlag(nuke.STARTLINE)
-    roto_left_nostril.setFlag(nuke.STARTLINE)
-    roto_right_nostril.setFlag(nuke.STARTLINE)
-    roto_lips_outer.setFlag(nuke.STARTLINE)
-    roto_lips_inner.setFlag(nuke.STARTLINE)
-    roto_left_eye.setFlag(nuke.STARTLINE)
-    roto_right_eye.setFlag(nuke.STARTLINE)
-    roto_left_iris.setFlag(nuke.STARTLINE)
-    roto_right_iris.setFlag(nuke.STARTLINE)
-    roto_left_eyebrow.setFlag(nuke.STARTLINE)
-    roto_right_eyebrow.setFlag(nuke.STARTLINE)
+    # Configure 2x6 grid layout (Column 1 starts line, Column 2 clears startline)
+    roto_oval.setFlag(nuke.STARTLINE)
+    roto_nose_bridge.clearFlag(nuke.STARTLINE)
     
+    roto_left_nostril.setFlag(nuke.STARTLINE)
+    roto_right_nostril.clearFlag(nuke.STARTLINE)
+    
+    roto_lips_outer.setFlag(nuke.STARTLINE)
+    roto_lips_inner.clearFlag(nuke.STARTLINE)
+    
+    roto_left_eye.setFlag(nuke.STARTLINE)
+    roto_right_eye.clearFlag(nuke.STARTLINE)
+    
+    roto_left_iris.setFlag(nuke.STARTLINE)
+    roto_right_iris.clearFlag(nuke.STARTLINE)
+    
+    roto_left_eyebrow.setFlag(nuke.STARTLINE)
+    roto_right_eyebrow.clearFlag(nuke.STARTLINE)
+    
+    # Add knobs in row-major order (Column 1, then Column 2)
     node.addKnob(roto_oval)
     node.addKnob(roto_nose_bridge)
+    
     node.addKnob(roto_left_nostril)
     node.addKnob(roto_right_nostril)
+    
     node.addKnob(roto_lips_outer)
     node.addKnob(roto_lips_inner)
+    
     node.addKnob(roto_left_eye)
     node.addKnob(roto_right_eye)
+    
     node.addKnob(roto_left_iris)
     node.addKnob(roto_right_iris)
+    
     node.addKnob(roto_left_eyebrow)
     node.addKnob(roto_right_eyebrow)
     
     node.addKnob(nuke.Text_Knob("divider_roto_action", "", ""))
+    
+    # Bezier Spline Toggle
+    roto_bezier = nuke.Boolean_Knob("roto_bezier", "Bezier Splines", True)
+    roto_bezier.setFlag(nuke.STARTLINE)
+    roto_bezier.setTooltip("If enabled, export Roto shapes as smooth Bezier curves instead of sharp linear polylines.")
+    node.addKnob(roto_bezier)
     
     create_roto_btn = nuke.PyScript_Knob("create_roto_btn", "Export Roto", "import nuke_tracker; nuke_tracker.generate_roto_node_from_panel(nuke.thisNode())")
     create_roto_btn.setFlag(nuke.STARTLINE)
@@ -1327,6 +1346,12 @@ def generate_roto_node(parent_node, json_path, width, height):
     if parent_node['roto_right_nostril'].value():
         selected_contours.append("Nose_Right_Nostril")
 
+    # Read Bezier preference
+    try:
+        bezier_enabled = bool(parent_node['roto_bezier'].value())
+    except Exception:
+        bezier_enabled = False
+
     try:
         start_frame = int(parent_node['start_frame'].value())
         end_frame = int(parent_node['end_frame'].value())
@@ -1412,6 +1437,30 @@ def generate_roto_node(parent_node, json_path, width, height):
                 y_curve = anim_point.getPositionAnimCurve(1, "")
                 x_curve.addKey(frame, coords[0])
                 y_curve.addKey(frame, coords[1])
+                
+                # If Bezier is enabled and there are enough points, calculate smooth tangents
+                if bezier_enabled and num_points > 2:
+                    prev_coords = points[(idx - 1) % num_points]
+                    next_coords = points[(idx + 1) % num_points]
+                    
+                    dx = next_coords[0] - prev_coords[0]
+                    dy = next_coords[1] - prev_coords[1]
+                    
+                    tension = 0.25
+                    tx = dx * tension
+                    ty = dy * tension
+                    
+                    # Left tangent handle (incoming)
+                    lt_x = shape_point.leftTangent.getPositionAnimCurve(0, "")
+                    lt_y = shape_point.leftTangent.getPositionAnimCurve(1, "")
+                    lt_x.addKey(frame, -tx)
+                    lt_y.addKey(frame, -ty)
+                    
+                    # Right tangent handle (outgoing)
+                    rt_x = shape_point.rightTangent.getPositionAnimCurve(0, "")
+                    rt_y = shape_point.rightTangent.getPositionAnimCurve(1, "")
+                    rt_x.addKey(frame, tx)
+                    rt_y.addKey(frame, ty)
                 
     # Force Nuke to evaluate and refresh the curves in the viewer
     curves_knob.changed()
