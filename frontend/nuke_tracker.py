@@ -366,59 +366,26 @@ def run_tracking_on_node(node):
         nuke.message("Please specify a valid path for the output JSON file.")
         return False
         
-    # Resolve selected landmarks and contours across both tabs
+    # Resolve all possible landmarks and contours to track everything in one go
     if not landmarks_config:
         nuke.message("Landmarks configuration could not be imported. Please verify backend/landmarks_config.py.")
         return False
         
     selected_names = []
     
-    # 1. From Tracker Tab (based on density selection)
-    density = node['landmark_density'].value()
-    if "Sparse" in density:
-        if node['track_nose'].value():
-            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Nose"].keys())
-        if node['track_eyes'].value():
-            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyes"].keys())
-        if node['track_eyebrows'].value():
-            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Eyebrows"].keys())
-        if node['track_mouth'].value():
-            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Mouth"].keys())
-        if node['track_contour'].value():
-            selected_names.extend(landmarks_config.LANDMARK_GROUPS["Face Shape"].keys())
-    elif "Dense" in density:
-        if node['roto_oval'].value():
-            selected_names.extend([f"Face_Oval_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Face_Oval"]))])
-        if node['roto_lips_outer'].value():
-            selected_names.extend([f"Lips_Outer_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Outer"]))])
-        if node['roto_lips_inner'].value():
-            selected_names.extend([f"Lips_Inner_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Inner"]))])
-        if node['roto_left_eye'].value():
-            selected_names.extend([f"Left_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eye"]))])
-        if node['roto_right_eye'].value():
-            selected_names.extend([f"Right_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eye"]))])
-        if node['roto_left_eyebrow'].value():
-            selected_names.extend([f"Left_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eyebrow"]))])
-        if node['roto_right_eyebrow'].value():
-            selected_names.extend([f"Right_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eyebrow"]))])
-    elif "Full" in density:
-        selected_names.extend([f"Mesh_{i}" for i in range(468)])
+    # 1. All sparse standard landmarks
+    for group in landmarks_config.LANDMARK_GROUPS.values():
+        selected_names.extend(group.keys())
         
-    # 2. From Roto Tab
-    if node['roto_oval'].value():
-        selected_names.append("Face_Oval")
-    if node['roto_lips_outer'].value():
-        selected_names.append("Lips_Outer")
-    if node['roto_lips_inner'].value():
-        selected_names.append("Lips_Inner")
-    if node['roto_left_eye'].value():
-        selected_names.append("Left_Eye")
-    if node['roto_right_eye'].value():
-        selected_names.append("Right_Eye")
-    if node['roto_left_eyebrow'].value():
-        selected_names.append("Left_Eyebrow")
-    if node['roto_right_eyebrow'].value():
-        selected_names.append("Right_Eyebrow")
+    # 2. All dense contour landmarks
+    for group_name, pts in landmarks_config.CONTOUR_GROUPS.items():
+        selected_names.extend([f"{group_name}_{i}" for i in range(len(pts))])
+        
+    # 3. All full mesh landmarks
+    selected_names.extend([f"Mesh_{i}" for i in range(468)])
+    
+    # 4. All Roto contour groups
+    selected_names.extend(landmarks_config.CONTOUR_GROUPS.keys())
         
     # Filter unique list
     selected_names = list(set(selected_names))
@@ -802,15 +769,48 @@ def generate_tracker_node(parent_node, json_path, width, height):
         nuke.message(f"Failed to parse JSON file:\n{str(e)}")
         return False
         
+    # Resolve selected landmarks based on CURRENT options in the properties panel
+    density = parent_node['landmark_density'].value()
+    selected_landmarks = []
+    
+    if "Sparse" in density:
+        if parent_node['track_nose'].value():
+            selected_landmarks.extend(landmarks_config.LANDMARK_GROUPS["Nose"].keys())
+        if parent_node['track_eyes'].value():
+            selected_landmarks.extend(landmarks_config.LANDMARK_GROUPS["Eyes"].keys())
+        if parent_node['track_eyebrows'].value():
+            selected_landmarks.extend(landmarks_config.LANDMARK_GROUPS["Eyebrows"].keys())
+        if parent_node['track_mouth'].value():
+            selected_landmarks.extend(landmarks_config.LANDMARK_GROUPS["Mouth"].keys())
+        if parent_node['track_contour'].value():
+            selected_landmarks.extend(landmarks_config.LANDMARK_GROUPS["Face Shape"].keys())
+    elif "Dense" in density:
+        if parent_node['roto_oval'].value():
+            selected_landmarks.extend([f"Face_Oval_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Face_Oval"]))])
+        if parent_node['roto_lips_outer'].value():
+            selected_landmarks.extend([f"Lips_Outer_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Outer"]))])
+        if parent_node['roto_lips_inner'].value():
+            selected_landmarks.extend([f"Lips_Inner_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Lips_Inner"]))])
+        if parent_node['roto_left_eye'].value():
+            selected_landmarks.extend([f"Left_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eye"]))])
+        if parent_node['roto_right_eye'].value():
+            selected_landmarks.extend([f"Right_Eye_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eye"]))])
+        if parent_node['roto_left_eyebrow'].value():
+            selected_landmarks.extend([f"Left_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Left_Eyebrow"]))])
+        if parent_node['roto_right_eyebrow'].value():
+            selected_landmarks.extend([f"Right_Eyebrow_{i}" for i in range(len(landmarks_config.CONTOUR_GROUPS["Right_Eyebrow"]))])
+    elif "Full" in density:
+        selected_landmarks.extend([f"Mesh_{i}" for i in range(468)])
+
     active_tracks = {}
     for name, data in tracker_data.items():
-        if data:
+        if name in selected_landmarks and data:
             first_val = list(data.values())[0]
             if isinstance(first_val[0], (int, float)):
                 active_tracks[name] = data
                 
     if not active_tracks:
-        nuke.message("Face detected but failed to track any landmarks in the specified frame range.")
+        nuke.message("Please select at least one tracking landmark to export, or ensure you have tracked first.")
         return False
         
     # Deselect all nodes to cleanly connect the new Tracker4 node to our custom node
@@ -919,15 +919,32 @@ def generate_roto_node(parent_node, json_path, width, height):
         nuke.message(f"Failed to parse JSON file:\n{str(e)}")
         return False
         
+    # Resolve selected contours based on CURRENT options in the properties panel
+    selected_contours = []
+    if parent_node['roto_oval'].value():
+        selected_contours.append("Face_Oval")
+    if parent_node['roto_lips_outer'].value():
+        selected_contours.append("Lips_Outer")
+    if parent_node['roto_lips_inner'].value():
+        selected_contours.append("Lips_Inner")
+    if parent_node['roto_left_eye'].value():
+        selected_contours.append("Left_Eye")
+    if parent_node['roto_right_eye'].value():
+        selected_contours.append("Right_Eye")
+    if parent_node['roto_left_eyebrow'].value():
+        selected_contours.append("Left_Eyebrow")
+    if parent_node['roto_right_eyebrow'].value():
+        selected_contours.append("Right_Eyebrow")
+
     active_contours = {}
     for name, data in roto_data.items():
-        if data:
+        if name in selected_contours and data:
             first_val = list(data.values())[0]
             if isinstance(first_val[0], list):
                 active_contours[name] = data
                 
     if not active_contours:
-        nuke.message("Face detected but failed to track any contours in the specified frame range.")
+        nuke.message("Please select at least one contour group to export, or ensure you have tracked first.")
         return False
         
     try:
