@@ -18,19 +18,59 @@ except ImportError:
 
 
 def find_upstream_read(node):
-    """Recursively traverses upstream to find the first Read node."""
+    """Recursively traverses upstream following the active image pipeline to find the
+    first node with a 'file' knob (e.g., Read, Write, DeepRead) to ensure we always 
+    use the active image stream.
+    """
     if not node:
         return None
-    if node.Class() == "Read":
+        
+    # If the node has a 'file' knob, we've found our image source leaf
+    if node.knob('file') is not None:
         return node
-    
-    # Traverse all upstream inputs
-    for i in range(node.inputs()):
-        parent = node.input(i)
-        result = find_upstream_read(parent)
-        if result:
-            return result
+        
+    # Check for Switch/Dissolve nodes which select a specific active input
+    if node.Class() in ('Switch', 'Dissolve') and node.knob('which') is not None:
+        try:
+            active_index = int(node['which'].evaluate())
+            if 0 <= active_index < node.inputs():
+                active_input = node.input(active_index)
+                if active_input:
+                    result = find_upstream_read(active_input)
+                    if result:
+                        return result
+        except Exception as e:
+            print("[FaceTracker] Warning evaluating switch node '{}': {}".format(node.name(), str(e)))
+            
+    # For standard nodes, follow the primary input (input 0 / B-pipe in Nuke) first
+    if node.inputs() > 0:
+        primary_input = node.input(0)
+        if primary_input:
+            result = find_upstream_read(primary_input)
+            if result:
+                return result
+                
+        # If input 0 is not connected, check other inputs as fallback (e.g., Merge with only A connected)
+        for i in range(1, node.inputs()):
+            other_input = node.input(i)
+            if other_input:
+                result = find_upstream_read(other_input)
+                if result:
+                    return result
+                    
     return None
+
+
+def get_unique_output_json_path(node):
+    """Ensures and returns a unique output JSON path for the given node to avoid file collisions."""
+    current_val = node['output_json'].value()
+    if not current_val or "temp_tracker_data" in current_val:
+        directory = os.path.dirname(current_val) if current_val else plugin_dir
+        unique_path = os.path.join(directory, "temp_tracker_data_{}.json".format(node.name())).replace("\\", "/")
+        if current_val != unique_path:
+            node['output_json'].setValue(unique_path)
+        return unique_path
+    return current_val
 
 
 def find_vector_channels(node):
@@ -330,6 +370,9 @@ def create_face_tracker_node():
     # Force the first tab ('Tracking') to be the default active tab on creation
     node.setTab(0)
     
+    # Initialize the output JSON path to be unique from the start
+    get_unique_output_json_path(node)
+    
     return node
 
 
@@ -382,7 +425,7 @@ def run_tracking_on_node(node):
         nuke.message("Start frame cannot be greater than end frame!")
         return False
         
-    output_json = node['output_json'].value()
+    output_json = get_unique_output_json_path(node)
     if not output_json:
         nuke.message("Please specify a valid path for the output JSON file.")
         return False
@@ -1316,7 +1359,7 @@ def generate_roto_node(parent_node, json_path, width, height):
 
 def generate_tracker_node_from_panel(node):
     """Callback triggered from the Tracker tab. Loads JSON and builds the Tracker4 node."""
-    json_path = node['output_json'].value()
+    json_path = get_unique_output_json_path(node)
     if not json_path:
         nuke.message("Please specify a valid output JSON file path first.")
         return False
@@ -1338,7 +1381,7 @@ def generate_tracker_node_from_panel(node):
 
 def generate_roto_node_from_panel(node):
     """Callback triggered from the Roto tab. Loads JSON and builds the Roto node."""
-    json_path = node['output_json'].value()
+    json_path = get_unique_output_json_path(node)
     if not json_path:
         nuke.message("Please specify a valid output JSON file path first.")
         return False
@@ -1360,7 +1403,7 @@ def generate_roto_node_from_panel(node):
 
 def generate_cornerpin_node_from_panel(node):
     """Callback triggered from the CornerPin tab. Loads JSON, calculates corner pin data and builds the CornerPin2D node."""
-    json_path = node['output_json'].value()
+    json_path = get_unique_output_json_path(node)
     if not json_path:
         nuke.message("Please specify a valid output JSON file path first.")
         return False
