@@ -1,24 +1,26 @@
 # menu.py for Foundry Nuke
-# Registers menu items to easily access the Face Tracker plugin from the GUI.
+# Registers a custom icon inside Nuke's left-side Node toolbar.
 
 import nuke
 import os
+import sys
+
+# Ensure frontend path is in sys.path on startup
+plugin_dir = os.path.dirname(os.path.abspath(__file__))
+frontend_path = os.path.join(plugin_dir, "frontend")
+if frontend_path not in sys.path:
+    sys.path.append(frontend_path)
 
 try:
     import nuke_tracker
     
-    # Locate or create the "Antigravity" top-level menu
-    menubar = nuke.menu("Nuke")
-    antigravity_menu = menubar.findItem("Antigravity")
-    if not antigravity_menu:
-        antigravity_menu = menubar.addMenu("Antigravity")
-        
-    # Append the face tracker command to the menu
-    antigravity_menu.addCommand(
-        "MediaPipe Face Tracker", 
-        "nuke_tracker.show_dialog()", 
+    # Create a dedicated, distinct category in Nuke's left-side Node toolbar
+    toolbar = nuke.menu("Nodes")
+    custom_menu = toolbar.addMenu("Face Tracker", icon="Tracker.png")
+    custom_menu.addCommand(
+        "Face Tracker", 
+        "nuke_tracker.create_face_tracker_node()", 
         icon="Tracker.png"
     )
-    print("[NukeFaceTracker] Successfully initialized NukeFaceTracker menu.")
 except Exception as e:
     print(f"[NukeFaceTracker] Failed to load menu: {e}")
