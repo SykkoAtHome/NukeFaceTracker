@@ -220,8 +220,8 @@ def create_face_tracker_node():
     track_nose = nuke.Boolean_Knob("track_nose", "Nose (Tip, Bridge, Alar)", True)
     track_eyes = nuke.Boolean_Knob("track_eyes", "Eyes (Corners, Eyelids)", True)
     track_eyebrows = nuke.Boolean_Knob("track_eyebrows", "Eyebrows (Left & Right)", False)
-    track_mouth = nuke.Boolean_Knob("track_mouth", "Mouth (Lip contours & Corners)", False)
-    track_contour = nuke.Boolean_Knob("track_contour", "Face Contour (Chin, Forehead, Cheeks)", False)
+    track_mouth = nuke.Boolean_Knob("track_mouth", "Mouth (Lip contours & Corners)", True)
+    track_contour = nuke.Boolean_Knob("track_contour", "Face Contour (Chin, Forehead, Cheeks)", True)
     
     track_eyes.setFlag(nuke.STARTLINE)
     track_eyebrows.setFlag(nuke.STARTLINE)
@@ -703,8 +703,7 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
                         
                     refined_pts.append([round(x_ref, 3), round(y_ref, 3)])
                     
-                if frame_str in frame_data:
-                    frame_data[frame_str] = refined_pts
+                frame_data[frame_str] = refined_pts
                 previous_refined[track_name] = refined_pts
                 
             else:
@@ -731,8 +730,7 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
                     
                 refined_pt = [round(x_ref, 3), round(y_ref, 3)]
                 
-                if frame_str in frame_data:
-                    frame_data[frame_str] = refined_pt
+                frame_data[frame_str] = refined_pt
                 previous_refined[track_name] = refined_pt
                 
         if task:
@@ -749,6 +747,67 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
             
     nuke.frame(orig_frame)
     return True
+
+
+def interpolate_missing_frames(frame_data, start_frame, end_frame):
+    """Fills in missing frames in frame_data from start_frame to end_frame using linear interpolation
+    for gaps and constant extrapolation for missing frames at the boundaries.
+    Supports both single points [x, y] and lists of points [[x1, y1], [x2, y2], ...].
+    """
+    sorted_existing = sorted([int(f) for f in frame_data.keys() if str(f) in frame_data])
+    if not sorted_existing:
+        return {} # No data at all to interpolate
+        
+    new_frame_data = {}
+    
+    # Helper to check if a value is a list of points
+    first_val = frame_data[str(sorted_existing[0])]
+    is_list_of_points = isinstance(first_val[0], list)
+    
+    for f in range(start_frame, end_frame + 1):
+        f_str = str(f)
+        if f_str in frame_data:
+            # Already exists, just copy
+            new_frame_data[f_str] = frame_data[f_str]
+        else:
+            # Needs interpolation or extrapolation
+            # Find the closest lower frame and closest higher frame
+            lower_frames = [lf for lf in sorted_existing if lf < f]
+            higher_frames = [hf for hf in sorted_existing if hf > f]
+            
+            if not lower_frames:
+                # Extrapolate from the first available frame (constant extrapolation)
+                closest_f = sorted_existing[0]
+                new_frame_data[f_str] = frame_data[str(closest_f)]
+            elif not higher_frames:
+                # Extrapolate from the last available frame (constant extrapolation)
+                closest_f = sorted_existing[-1]
+                new_frame_data[f_str] = frame_data[str(closest_f)]
+            else:
+                # Interpolate between lower and higher
+                f_prev = lower_frames[-1]
+                f_next = higher_frames[0]
+                val_prev = frame_data[str(f_prev)]
+                val_next = frame_data[str(f_next)]
+                
+                # Interpolation factor
+                t = (f - f_prev) / float(f_next - f_prev)
+                
+                if is_list_of_points:
+                    # Interpolate list of points
+                    interp_pts = []
+                    for p_prev, p_next in zip(val_prev, val_next):
+                        x = p_prev[0] + t * (p_next[0] - p_prev[0])
+                        y = p_prev[1] + t * (p_next[1] - p_prev[1])
+                        interp_pts.append([round(x, 3), round(y, 3)])
+                    new_frame_data[f_str] = interp_pts
+                else:
+                    # Interpolate single point
+                    x = val_prev[0] + t * (val_next[0] - val_prev[0])
+                    y = val_prev[1] + t * (val_next[1] - val_prev[1])
+                    new_frame_data[f_str] = [round(x, 3), round(y, 3)]
+                    
+    return new_frame_data
 
 
 def generate_tracker_node(parent_node, json_path, width, height):
@@ -796,12 +855,21 @@ def generate_tracker_node(parent_node, json_path, width, height):
     elif "Full" in density:
         selected_landmarks.extend([f"Mesh_{i}" for i in range(468)])
 
+    try:
+        start_frame = int(parent_node['start_frame'].value())
+        end_frame = int(parent_node['end_frame'].value())
+    except Exception:
+        start_frame = 1
+        end_frame = 100
+
     active_tracks = {}
     for name, data in tracker_data.items():
         if name in selected_landmarks and data:
             first_val = list(data.values())[0]
             if isinstance(first_val[0], (int, float)):
-                active_tracks[name] = data
+                interpolated_data = interpolate_missing_frames(data, start_frame, end_frame)
+                if interpolated_data:
+                    active_tracks[name] = interpolated_data
                 
     if not active_tracks:
         nuke.message("Please select at least one tracking landmark to export, or ensure you have tracked first.")
@@ -934,12 +1002,21 @@ def generate_roto_node(parent_node, json_path, width, height):
     if parent_node['roto_right_eyebrow'].value():
         selected_contours.append("Right_Eyebrow")
 
+    try:
+        start_frame = int(parent_node['start_frame'].value())
+        end_frame = int(parent_node['end_frame'].value())
+    except Exception:
+        start_frame = 1
+        end_frame = 100
+
     active_contours = {}
     for name, data in roto_data.items():
         if name in selected_contours and data:
             first_val = list(data.values())[0]
             if isinstance(first_val[0], list):
-                active_contours[name] = data
+                interpolated_data = interpolate_missing_frames(data, start_frame, end_frame)
+                if interpolated_data:
+                    active_contours[name] = interpolated_data
                 
     if not active_contours:
         nuke.message("Please select at least one contour group to export, or ensure you have tracked first.")

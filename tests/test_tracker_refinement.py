@@ -205,6 +205,44 @@ class TestTrackerRefinement(unittest.TestCase):
             success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
             self.assertTrue(success)
 
+    def test_interpolate_missing_frames_single_points(self):
+        """Test linear interpolation and constant extrapolation for a single point landmark (Tracker mode)."""
+        # Frame 1: [10.0, 20.0]
+        # Frame 3: [30.0, 40.0]
+        # Frame 2 is missing. Start frame is 0, end frame is 4.
+        # Expected output:
+        # Frame 0: Extrapolated to [10.0, 20.0]
+        # Frame 1: [10.0, 20.0]
+        # Frame 2: Interpolated to [20.0, 30.0]
+        # Frame 3: [30.0, 40.0]
+        # Frame 4: Extrapolated to [30.0, 40.0]
+        dummy_data = {
+            "1": [10.0, 20.0],
+            "3": [30.0, 40.0]
+        }
+        res = nuke_tracker.interpolate_missing_frames(dummy_data, start_frame=0, end_frame=4)
+        
+        self.assertEqual(res["0"], [10.0, 20.0])
+        self.assertEqual(res["1"], [10.0, 20.0])
+        self.assertEqual(res["2"], [20.0, 30.0])
+        self.assertEqual(res["3"], [30.0, 40.0])
+        self.assertEqual(res["4"], [30.0, 40.0])
+
+    def test_interpolate_missing_frames_list_of_points(self):
+        """Test linear interpolation and constant extrapolation for a list of points (Roto mode)."""
+        # Two points in contour
+        dummy_data = {
+            "2": [[10.0, 20.0], [100.0, 200.0]],
+            "4": [[30.0, 40.0], [300.0, 400.0]]
+        }
+        res = nuke_tracker.interpolate_missing_frames(dummy_data, start_frame=1, end_frame=5)
+        
+        self.assertEqual(res["1"], [[10.0, 20.0], [100.0, 200.0]])
+        self.assertEqual(res["2"], [[10.0, 20.0], [100.0, 200.0]])
+        self.assertEqual(res["3"], [[20.0, 30.0], [200.0, 300.0]])
+        self.assertEqual(res["4"], [[30.0, 40.0], [300.0, 400.0]])
+        self.assertEqual(res["5"], [[30.0, 40.0], [300.0, 400.0]])
+
 
 if __name__ == "__main__":
     unittest.main()
