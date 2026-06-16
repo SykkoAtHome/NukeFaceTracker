@@ -70,6 +70,17 @@ def find_upstream_read(node):
 
 def get_unique_output_json_path(node):
     """Ensures and returns a unique output JSON path for the given node to avoid file collisions."""
+    # Check if we should write results to a custom file
+    write_to_file = node['write_to_file'].value() if 'write_to_file' in node.knobs() else False
+    
+    if not write_to_file:
+        # Default to a safe, stable path inside Nuke's native temp directory
+        try:
+            temp_dir = nuke.temp_dir()
+        except Exception:
+            temp_dir = tempfile.gettempdir()
+        return os.path.join(temp_dir, f"facetracker_{node.name()}_data.json").replace("\\", "/")
+        
     current_val = node['output_json'].value()
     if not current_val or "temp_tracker_data" in current_val:
         directory = os.path.dirname(current_val) if current_val else plugin_dir
@@ -258,11 +269,16 @@ def create_face_tracker_node():
     # Output File Section
     node.addKnob(nuke.Text_Knob("divider_output", "Output Options", ""))
     
+    write_to_file_knob = nuke.Boolean_Knob("write_to_file", "Write Results to File", False)
+    write_to_file_knob.setTooltip("If enabled, saves the final tracking JSON data to a custom path of your choice.\nOtherwise, the tracking data is saved in Nuke's temporary directory automatically.")
+    node.addKnob(write_to_file_knob)
+    
     # Construct path cleanly to use forward slashes
     temp_json = os.path.join(plugin_dir, "temp_tracker_data.json").replace("\\", "/")
     output_json_knob = nuke.File_Knob("output_json", "Output JSON File")
     output_json_knob.setValue(temp_json)
     node.addKnob(output_json_knob)
+    output_json_knob.setVisible(False)
     
     node.addKnob(nuke.Text_Knob("divider_action", "", ""))
     
@@ -424,6 +440,8 @@ def create_face_tracker_node():
         "    density = k.value()\n"
         "    is_full = ('Full' in density)\n"
         "    n['info_full_mesh'].setVisible(is_full)\n"
+        "elif k.name() == 'write_to_file':\n"
+        "    n['output_json'].setVisible(k.value())\n"
     )
     node['knobChanged'].setValue(knob_changed_script)
     
@@ -583,9 +601,9 @@ def run_tracking_on_node(node):
         # Synchronously execute the temporary render in Nuke
         nuke.execute(write_node, start_frame, end_frame)
         
-        # Setup output paths for dual-pass tracking if backtrack is enabled
-        output_fwd = output_json.replace(".json", "_fwd.json")
-        output_bwd = output_json.replace(".json", "_bwd.json")
+        # Setup output paths for dual-pass tracking if backtrack is enabled (stored inside temp_dir)
+        output_fwd = os.path.join(temp_dir, "output_fwd.json").replace("\\", "/")
+        output_bwd = os.path.join(temp_dir, "output_bwd.json").replace("\\", "/")
         
         # Setup base subprocess command referencing the temporary JPEGs
         base_cmd = [
