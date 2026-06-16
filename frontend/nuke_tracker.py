@@ -501,7 +501,10 @@ def run_tracking_on_node(node):
         nuke_temp = nuke.temp_dir()
     except Exception:
         nuke_temp = None
-    temp_dir = tempfile.mkdtemp(dir=nuke_temp, prefix="nuke_facetracker_")
+        
+    import time
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    temp_dir = tempfile.mkdtemp(dir=nuke_temp, prefix=f"nuke_facetracker_{timestamp}_")
     temp_file_pattern = os.path.join(temp_dir, "frame_%04d.jpg").replace("\\", "/")
     
     # Trigger Subprocess tracking with a native Nuke progress modal
