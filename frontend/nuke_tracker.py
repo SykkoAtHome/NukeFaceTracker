@@ -584,7 +584,6 @@ def generate_tracker_node(parent_node, json_path, width, height):
     parent_node.setSelected(True)
     tracker.setSelected(True)
     
-    nuke.message(f"Success!\nGenerated Tracker4 node '{tracker.name()}' downstream from '{parent_node.name()}' with {len(active_tracks)} track points.")
     return True
 
 
@@ -676,5 +675,4 @@ def generate_roto_node(parent_node, json_path, width, height):
     parent_node.setSelected(True)
     roto_node.setSelected(True)
     
-    nuke.message(f"Success!\nGenerated Roto node '{roto_node.name()}' downstream from '{parent_node.name()}' with {len(active_contours)} closed animated shapes.")
     return True
