@@ -1292,6 +1292,73 @@ def generate_cornerpin_node(parent_node, json_path, width, height):
     return True
 
 
+def _is_tracker_point_value(value):
+    return (
+        isinstance(value, (list, tuple))
+        and len(value) >= 2
+        and isinstance(value[0], (int, float))
+        and isinstance(value[1], (int, float))
+    )
+
+
+def _get_contour_point_spec(point_name):
+    if not landmarks_config:
+        return None, None
+
+    for group_name, indices in landmarks_config.CONTOUR_GROUPS.items():
+        prefix = group_name + "_"
+        if point_name.startswith(prefix):
+            try:
+                point_index = int(point_name[len(prefix):])
+            except Exception:
+                return None, None
+
+            if 0 <= point_index < len(indices):
+                return group_name, point_index
+
+    return None, None
+
+
+def _extract_contour_point_track(contour_data, point_index):
+    point_track = {}
+
+    for frame, points in contour_data.items():
+        if not isinstance(points, (list, tuple)) or point_index >= len(points):
+            continue
+
+        coords = points[point_index]
+        if _is_tracker_point_value(coords):
+            point_track[frame] = coords
+
+    return point_track
+
+
+def _resolve_active_tracker_tracks(tracker_data, selected_landmarks):
+    active_tracks = {}
+
+    for name in selected_landmarks:
+        data = tracker_data.get(name)
+        if data:
+            first_val = next(iter(data.values()), None)
+            if _is_tracker_point_value(first_val):
+                active_tracks[name] = data
+                continue
+
+        group_name, point_index = _get_contour_point_spec(name)
+        if group_name is None:
+            continue
+
+        contour_data = tracker_data.get(group_name)
+        if not contour_data:
+            continue
+
+        point_track = _extract_contour_point_track(contour_data, point_index)
+        if point_track:
+            active_tracks[name] = point_track
+
+    return active_tracks
+
+
 def generate_tracker_node(parent_node, json_path, width, height):
     """Loads JSON tracking results and serializes them into a keyframed Nuke Tracker4 node."""
     if not os.path.exists(json_path):
@@ -1319,14 +1386,12 @@ def generate_tracker_node(parent_node, json_path, width, height):
         start_frame = 1
         end_frame = 100
 
+    resolved_tracks = _resolve_active_tracker_tracks(tracker_data, selected_landmarks)
     active_tracks = {}
-    for name, data in tracker_data.items():
-        if name in selected_landmarks and data:
-            first_val = list(data.values())[0]
-            if isinstance(first_val[0], (int, float)):
-                interpolated_data = interpolate_missing_frames(data, start_frame, end_frame)
-                if interpolated_data:
-                    active_tracks[name] = interpolated_data
+    for name, data in resolved_tracks.items():
+        interpolated_data = interpolate_missing_frames(data, start_frame, end_frame)
+        if interpolated_data:
+            active_tracks[name] = interpolated_data
 
     # Inject corner pin tracker points if requested
     if parent_node['export_cornerpin_tracker'].value():
@@ -1349,7 +1414,6 @@ def generate_tracker_node(parent_node, json_path, width, height):
         active_tracks["Corner_BR"] = corner_br
         active_tracks["Corner_TR"] = corner_tr
         active_tracks["Corner_TL"] = corner_tl
-
     if not active_tracks:
         nuke.message("Please select at least one tracking landmark to export, or ensure you have tracked first.")
         return False

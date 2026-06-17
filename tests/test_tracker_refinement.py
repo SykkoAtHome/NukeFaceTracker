@@ -488,6 +488,56 @@ class TestTrackerRefinement(unittest.TestCase):
             self.assertEqual(cp.leftTangent.curves[0].keys, [])
             self.assertEqual(cp.rightTangent.curves[0].keys, [])
 
+    def test_generate_tracker_node_expands_dense_contour_groups(self):
+        """Dense tracker export expands grouped contour JSON into one Tracker4 track per point."""
+        import json
+
+        mock_parent = MagicMock()
+        mock_parent.name.return_value = "FaceTracker1"
+        mock_parent.parent.return_value = MagicMock()
+
+        knobs = {
+            'landmark_density': MagicMock(value=lambda: "Dense"),
+            'track_nose': MagicMock(value=lambda: False),
+            'track_eyes': MagicMock(value=lambda: True),
+            'track_eyebrows': MagicMock(value=lambda: True),
+            'track_mouth': MagicMock(value=lambda: True),
+            'track_contour': MagicMock(value=lambda: True),
+            'export_t': MagicMock(value=lambda: True),
+            'export_r': MagicMock(value=lambda: False),
+            'export_s': MagicMock(value=lambda: False),
+            'export_cornerpin_tracker': MagicMock(value=lambda: False),
+        }
+        mock_parent.__getitem__.side_effect = lambda key: knobs[key]
+
+        grouped_contours = {}
+        for group_name, indices in nuke_tracker.landmarks_config.CONTOUR_GROUPS.items():
+            grouped_contours[group_name] = {
+                "1": [[float(i), float(i + 100)] for i in range(len(indices))]
+            }
+
+        mock_nuke.allNodes.return_value = []
+        mock_tracker = MagicMock()
+        mock_tracks_knob = MagicMock()
+        mock_tracker.__getitem__.return_value = mock_tracks_knob
+        mock_nuke.createNode.return_value = mock_tracker
+
+        with patch("os.path.exists", return_value=True), \
+             patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(grouped_contours))):
+            success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
+
+        self.assertTrue(success)
+        from_script = mock_tracks_knob.fromScript.call_args.args[0]
+        expected_tracks = len(
+            nuke_tracker.landmarks_config.get_landmarks_for_density(
+                "Dense",
+                ["Eyes", "Eyebrows", "Mouth", "Face Shape"],
+            )
+        )
+        self.assertIn(f"{{ 1 31 {expected_tracks} }}", from_script)
+        self.assertIn('"Face_Oval_0"', from_script)
+        self.assertIn('"Right_Eyebrow_9"', from_script)
+
 
 if __name__ == "__main__":
     unittest.main()
