@@ -9,7 +9,7 @@ import landmarks_config
 import tracker_backend
 
 class TestNukeFaceTracker(unittest.TestCase):
-    
+
     def test_get_landmarks_by_names_all(self):
         """Test retrieving all landmarks when no names are specified."""
         res = landmarks_config.get_landmarks_by_names([])
@@ -72,6 +72,149 @@ class TestNukeFaceTracker(unittest.TestCase):
         pattern = "D:/footage/shot_01/reference_frame.png"
         path = tracker_backend.get_frame_path(pattern, 10)
         self.assertEqual(path, "D:/footage/shot_01/reference_frame.png")
+
+    def test_nose_alar_orientations(self):
+        """Verify person's left is 358 (screen right) and person's right is 129 (screen left)."""
+        self.assertEqual(landmarks_config.LANDMARK_GROUPS["Nose"]["Nose_Left_Alar"], 358)
+        self.assertEqual(landmarks_config.LANDMARK_GROUPS["Nose"]["Nose_Right_Alar"], 129)
+
+    def test_nose_bridge_scalar_and_contour_do_not_collide(self):
+        """Verify sparse Nose_Bridge and dense nose bridge contour use distinct JSON keys."""
+        self.assertEqual(landmarks_config.LANDMARK_GROUPS["Nose"]["Nose_Bridge"], 168)
+        self.assertNotIn("Nose_Bridge", landmarks_config.CONTOUR_GROUPS)
+        self.assertIn("Nose_Bridge_Contour", landmarks_config.CONTOUR_GROUPS)
+
+        res = landmarks_config.get_landmarks_for_density("Dense (Contours - 149 pts)", ["Nose"])
+        self.assertEqual(res["Nose_Bridge"], 168)
+        self.assertEqual(res["Nose_Bridge_Contour_0"], 6)
+
+    def test_mesh_partition_properties(self):
+        """Verify that the 478 landmark mesh is partitioned cleanly with no overlaps or missing indices."""
+        eyebrows = set(landmarks_config.EYEBROWS_MESH_INDICES)
+        eyes = set(landmarks_config.EYES_MESH_INDICES)
+        lips = set(landmarks_config.LIPS_MESH_INDICES)
+        nose = set(landmarks_config.NOSE_MESH_INDICES)
+        face_shape = set(landmarks_config.FACE_SHAPE_MESH_INDICES)
+
+        # Check total number of points across partitions
+        sum_lengths = len(eyebrows) + len(eyes) + len(lips) + len(nose) + len(face_shape)
+        self.assertEqual(sum_lengths, 478)
+
+        # Check union contains all 478 indices with no gaps
+        union_set = eyebrows | eyes | lips | nose | face_shape
+        self.assertEqual(len(union_set), 478)
+        self.assertEqual(min(union_set), 0)
+        self.assertEqual(max(union_set), 477)
+
+        # Check non-overlapping disjoint properties
+        self.assertTrue(eyebrows.isdisjoint(eyes))
+        self.assertTrue(eyebrows.isdisjoint(lips))
+        self.assertTrue(eyebrows.isdisjoint(nose))
+        self.assertTrue(eyebrows.isdisjoint(face_shape))
+        self.assertTrue(eyes.isdisjoint(lips))
+        self.assertTrue(eyes.isdisjoint(nose))
+        self.assertTrue(eyes.isdisjoint(face_shape))
+        self.assertTrue(lips.isdisjoint(nose))
+        self.assertTrue(lips.isdisjoint(face_shape))
+        self.assertTrue(nose.isdisjoint(face_shape))
+
+    def test_get_landmarks_for_density_sparse(self):
+        """Verify sparse resolver returns standard landmark groups for active facial parts."""
+        res = landmarks_config.get_landmarks_for_density("Sparse (Standard - 31 pts)", ["Nose", "Eyebrows"])
+        # Expected keys should be exactly keys of landmarks_config.LANDMARK_GROUPS["Nose"] and ["Eyebrows"]
+        expected_keys = set(landmarks_config.LANDMARK_GROUPS["Nose"].keys()) | set(landmarks_config.LANDMARK_GROUPS["Eyebrows"].keys())
+        self.assertEqual(set(res.keys()), expected_keys)
+        self.assertEqual(res["Nose_Tip"], 4)
+        self.assertEqual(res["Left_Eyebrow_Outer"], 300)
+
+    def test_get_landmarks_for_density_dense(self):
+        """Verify dense resolver returns sequential contours and nose sparse/contour points."""
+        res = landmarks_config.get_landmarks_for_density("Dense (Contours - 149 pts)", ["Eyebrows", "Eyes"])
+
+        # Check that Eyebrows contour tracks are in the resolved set
+        self.assertIn("Left_Eyebrow_0", res)
+        self.assertIn("Right_Eyebrow_0", res)
+
+        # Check that Eyes and Irises contour tracks are in the resolved set
+        self.assertIn("Left_Eye_0", res)
+        self.assertIn("Right_Eye_0", res)
+        self.assertIn("Left_Iris_0", res)
+        self.assertIn("Right_Iris_0", res)
+
+    def test_get_landmarks_for_density_full(self):
+        """Verify full resolver returns exact partition mesh indices prefixed with Mesh_."""
+        res = landmarks_config.get_landmarks_for_density("Full (Entire Mesh & Iris - 478 pts)", ["Eyebrows"])
+        expected_keys = {f"Mesh_{idx}" for idx in landmarks_config.EYEBROWS_MESH_INDICES}
+        self.assertEqual(set(res.keys()), expected_keys)
+        self.assertEqual(res["Mesh_70"], 70)
+
+    def test_iris_contours_exclude_centers(self):
+        """Verify that Left_Iris and Right_Iris contour lists have exactly 4 points and do not include the centers."""
+        left_iris_contour = landmarks_config.CONTOUR_GROUPS["Left_Iris"]
+        right_iris_contour = landmarks_config.CONTOUR_GROUPS["Right_Iris"]
+
+        self.assertEqual(len(left_iris_contour), 4)
+        self.assertEqual(len(right_iris_contour), 4)
+
+        # Verify center points (468, 473) are not in the contour boundaries
+        self.assertNotIn(468, left_iris_contour)
+        self.assertNotIn(473, right_iris_contour)
+
+    def test_nostril_contours(self):
+        """Verify that Left and Right Nostril contours contain the standard 6 points defining the nostrils."""
+        left_nostril = landmarks_config.CONTOUR_GROUPS["Nose_Left_Nostril"]
+        right_nostril = landmarks_config.CONTOUR_GROUPS["Nose_Right_Nostril"]
+
+        self.assertEqual(len(left_nostril), 6)
+        self.assertEqual(len(right_nostril), 6)
+
+        # Verify standard landmarks are in the sets
+        self.assertTrue(set([250, 290, 305, 309, 392, 458]).issubset(set(left_nostril)))
+        self.assertTrue(set([20, 60, 75, 79, 166, 238]).issubset(set(right_nostril)))
+
+    def test_merge_results_averaging_and_gap_patching(self):
+        """Test merge_results for landmarks and contours averaging and gap patching."""
+        forward = {
+            "Nose_Tip": {
+                "1": [10.0, 20.0],
+                "2": [12.0, 22.0]
+            },
+            "Lips_Outer": {
+                "1": [[1.0, 2.0], [3.0, 4.0]],
+                "2": [[5.0, 6.0], [7.0, 8.0]]
+            }
+        }
+        backward = {
+            "Nose_Tip": {
+                "2": [14.0, 24.0],
+                "3": [16.0, 26.0]
+            },
+            "Lips_Outer": {
+                "2": [[7.0, 8.0], [9.0, 10.0]],
+                "3": [[11.0, 12.0], [13.0, 14.0]]
+            }
+        }
+
+        contours_to_track = {"Lips_Outer": [0, 1]}
+        landmarks_to_track = {"Nose_Tip": 4}
+
+        merged = tracker_backend.merge_results(forward, backward, contours_to_track, landmarks_to_track)
+
+        # Verify Nose_Tip
+        # Frame 1: Only in forward -> [10.0, 20.0]
+        self.assertEqual(merged["Nose_Tip"]["1"], [10.0, 20.0])
+        # Frame 2: In both -> average: (12+14)/2 = 13.0, (22+24)/2 = 23.0
+        self.assertEqual(merged["Nose_Tip"]["2"], [13.0, 23.0])
+        # Frame 3: Only in backward -> [16.0, 26.0]
+        self.assertEqual(merged["Nose_Tip"]["3"], [16.0, 26.0])
+
+        # Verify Lips_Outer
+        # Frame 1: Only forward -> [[1.0, 2.0], [3.0, 4.0]]
+        self.assertEqual(merged["Lips_Outer"]["1"], [[1.0, 2.0], [3.0, 4.0]])
+        # Frame 2: In both -> average of matching points
+        self.assertEqual(merged["Lips_Outer"]["2"], [[6.0, 7.0], [8.0, 9.0]])
+        # Frame 3: Only backward -> [[11.0, 12.0], [13.0, 14.0]]
+        self.assertEqual(merged["Lips_Outer"]["3"], [[11.0, 12.0], [13.0, 14.0]])
 
 if __name__ == "__main__":
     unittest.main()
