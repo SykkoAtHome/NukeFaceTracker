@@ -167,20 +167,40 @@ Use it in a browser to:
 - Create parent groups such as `nose`, `eyes`, or `mouth`.
 - Create child groups such as `left_nostril`, `left_iris`, or `lips_outer`.
 - Assign points by clicking landmarks or by entering manual ID ranges.
-- Import and export nested JSON mappings.
+- Import and export profile-based nested JSON mappings.
 - Validate duplicate, invalid, and unassigned IDs across the 0-477 range,
   including iris IDs.
 
-The tool exports a parent -> child JSON structure, for example:
+The tool exports all mapping profiles together. Each profile contains the
+parent -> child group structure:
 
 ```json
 {
-  "nose": {
-    "left_nostril": [458, 250, 290],
-    "right_nostril": [75, 60, 20]
+  "profiles": {
+    "full": {
+      "nose": {
+        "left_nostril": [458, 250, 290],
+        "right_nostril": [75, 60, 20]
+      }
+    },
+    "dense": {
+      "nose": {
+        "left_nostril": [458, 250],
+        "right_nostril": [75, 60]
+      }
+    },
+    "sparse": {
+      "nose": {
+        "left_nostril": [458],
+        "right_nostril": [75]
+      }
+    }
   }
 }
 ```
+
+For compatibility, importing a plain parent -> child mapping still loads it
+into the currently selected profile.
 
 ---
 
