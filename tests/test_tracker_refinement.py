@@ -662,15 +662,73 @@ class TestTrackerRefinement(unittest.TestCase):
 
         self.assertTrue(success)
         from_script = mock_tracks_knob.fromScript.call_args.args[0]
-        expected_tracks = len(
-            nuke_tracker.landmarks_config.get_landmarks_for_density(
-                "Dense",
-                ["Eyes", "Eyebrows", "Mouth", "Face Shape"],
-            )
+        resolved_landmarks = nuke_tracker.landmarks_config.get_landmarks_for_density(
+            "Dense",
+            ["Eyes", "Eyebrows", "Mouth", "Face Shape"],
         )
+        expected_tracks = len(set(resolved_landmarks.values()))
         self.assertIn(f"{{ 1 31 {expected_tracks} }}", from_script)
         self.assertIn('"Face_Oval_0"', from_script)
+        self.assertIn('"Face_Oval_8"', from_script)
+        self.assertNotIn('"Left_Cheek_Bone_0"', from_script)
+        self.assertNotIn('"Right_Cheek_Bone_0"', from_script)
         self.assertIn('"Right_Eyebrow_9"', from_script)
+
+    def test_generate_tracker_node_dedupes_dense_nose_aliases(self):
+        """Dense tracker export emits one Tracker4 track per MediaPipe index."""
+        import json
+
+        mock_parent = MagicMock()
+        mock_parent.name.return_value = "FaceTracker1"
+        mock_parent.parent.return_value = MagicMock()
+
+        knobs = {
+            'landmark_density': MagicMock(value=lambda: "Dense"),
+            'track_nose': MagicMock(value=lambda: True),
+            'track_eyes': MagicMock(value=lambda: False),
+            'track_eyebrows': MagicMock(value=lambda: False),
+            'track_mouth': MagicMock(value=lambda: False),
+            'track_contour': MagicMock(value=lambda: False),
+            'export_t': MagicMock(value=lambda: True),
+            'export_r': MagicMock(value=lambda: False),
+            'export_s': MagicMock(value=lambda: False),
+            'export_cornerpin_tracker': MagicMock(value=lambda: False),
+        }
+        mock_parent.__getitem__.side_effect = lambda key: knobs[key]
+
+        tracker_data = {
+            "Nose_Tip": {"1": [4.0, 104.0]},
+            "Nose_Bridge": {"1": [168.0, 268.0]},
+            "Nose_Bottom": {"1": [2.0, 102.0]},
+            "Nose_Left_Alar": {"1": [358.0, 458.0]},
+            "Nose_Right_Alar": {"1": [129.0, 229.0]},
+            "Nose_Columella": {"1": [1.0, 101.0]},
+            "Nose_Subnasale": {"1": [2.0, 102.0]},
+            "Nose_Bridge_Contour": {"1": [[float(i), float(i + 100)] for i in range(5)]},
+            "Nose_Left_Nostril": {"1": [[float(i), float(i + 100)] for i in range(6)]},
+            "Nose_Right_Nostril": {"1": [[float(i), float(i + 100)] for i in range(6)]},
+        }
+
+        mock_nuke.allNodes.return_value = []
+        mock_tracker = MagicMock()
+        mock_tracks_knob = MagicMock()
+        mock_tracker.__getitem__.return_value = mock_tracks_knob
+        mock_nuke.createNode.return_value = mock_tracker
+
+        with patch("os.path.exists", return_value=True), \
+             patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(tracker_data))):
+            success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
+
+        self.assertTrue(success)
+        from_script = mock_tracks_knob.fromScript.call_args.args[0]
+        resolved_landmarks = nuke_tracker.landmarks_config.get_landmarks_for_density("Dense", ["Nose"])
+        expected_tracks = len(set(resolved_landmarks.values()))
+        self.assertIn(f"{{ 1 31 {expected_tracks} }}", from_script)
+        self.assertIn('"Nose_Bridge"', from_script)
+        self.assertIn('"Nose_Bridge_Contour_0"', from_script)
+        self.assertNotIn('"Nose_Bridge_Contour_4"', from_script)
+        self.assertIn('"Nose_Bottom"', from_script)
+        self.assertNotIn('"Nose_Subnasale"', from_script)
 
 
 if __name__ == "__main__":

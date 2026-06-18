@@ -63,6 +63,8 @@ nuke.pluginAddPath("d:/code/NukeFaceTracker")
   - `model_downloader.py` - Downloads the optimized `.task` model file.
 - `frontend/` - Nuke UI panel and node builder.
   - `nuke_tracker.py` - PySide Python panel and Tracker4 TCL builder.
+- `tools/` - Standalone helper utilities.
+  - `mediapipe_landmark_grouper.html` - Browser-based landmark grouping tool for reviewing MediaPipe IDs, including 478-point iris IDs and duplicate validation.
 
 ---
 

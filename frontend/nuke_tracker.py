@@ -1350,6 +1350,20 @@ def _resolve_active_tracker_tracks(tracker_data, selected_landmarks):
     return active_tracks
 
 
+def _dedupe_landmark_names_by_index(resolved_landmarks):
+    selected_names = []
+    seen_indices = set()
+
+    for name, landmark_index in resolved_landmarks.items():
+        if landmark_index in seen_indices:
+            continue
+
+        selected_names.append(name)
+        seen_indices.add(landmark_index)
+
+    return selected_names
+
+
 def generate_tracker_node(parent_node, json_path, width, height):
     """Loads JSON tracking results and serializes them into a keyframed Nuke Tracker4 node."""
     if not os.path.exists(json_path):
@@ -1368,7 +1382,7 @@ def generate_tracker_node(parent_node, json_path, width, height):
 
     active_parts = get_active_tracker_parts(parent_node)
     resolved_landmarks = landmarks_config.get_landmarks_for_density(density, active_parts)
-    selected_landmarks = list(resolved_landmarks.keys())
+    selected_landmarks = _dedupe_landmark_names_by_index(resolved_landmarks)
 
     try:
         start_frame = int(parent_node['start_frame'].value())
