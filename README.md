@@ -37,7 +37,18 @@ library conflicts that can crash the host application.
 
 ## Installation
 
-### 1. Install Backend Dependencies
+### 1. Get the Plugin Files
+
+Clone this repository:
+
+```bat
+git clone https://github.com/SykkoAtHome/NukeFaceTracker.git
+```
+
+Or download the repository as a ZIP from GitHub and extract it anywhere on your
+machine. The extracted or cloned `NukeFaceTracker` folder is the plugin folder.
+
+### 2. Install Backend Dependencies
 
 From the plugin folder, run:
 
@@ -51,12 +62,21 @@ The installer:
 2. Installs the backend packages from `requirements.txt`.
 3. Downloads the MediaPipe `face_landmarker.task` model into `backend/`.
 
-### 2. Register the Plugin in Nuke
+### 3. Register the Plugin in Nuke
 
-Add the repository path to your user `.nuke/init.py`, for example:
+Add the path to your cloned or extracted `NukeFaceTracker` folder to your user
+`.nuke/init.py`.
 
 ```python
-nuke.pluginAddPath("D:/code/NukeFaceTracker")
+nuke.pluginAddPath("/path/to/NukeFaceTracker")
+```
+
+Replace `/path/to/NukeFaceTracker` with the real folder path on your machine. Use
+forward slashes in the path, including on Windows. For example, if you cloned or
+extracted the repo to `C:\Tools\NukeFaceTracker`, use:
+
+```python
+nuke.pluginAddPath("C:/Tools/NukeFaceTracker")
 ```
 
 On Nuke startup, this repo's `init.py` adds `frontend/` and `backend/` to the
