@@ -26,6 +26,40 @@ class TestTrackerRefinement(unittest.TestCase):
     def setUp(self):
         # Reset mock calls on each test run
         mock_nuke.reset_mock()
+        mock_nuke.frame.return_value = 1
+
+    def test_analysis_tracks_all_roto_export_contours(self):
+        """Tracking stores all Roto-tab contours so export choices can be changed later."""
+        mock_node = MagicMock()
+
+        knobs = {
+            'landmark_density': MagicMock(value=lambda: "Sparse (Standard - 31 pts)"),
+            'track_nose': MagicMock(value=lambda: False),
+            'track_eyes': MagicMock(value=lambda: False),
+            'track_eyebrows': MagicMock(value=lambda: False),
+            'track_mouth': MagicMock(value=lambda: False),
+            'track_contour': MagicMock(value=lambda: False),
+            'roto_oval': MagicMock(value=lambda: False),
+            'roto_nose_bridge': MagicMock(value=lambda: False),
+            'roto_left_nostril': MagicMock(value=lambda: False),
+            'roto_right_nostril': MagicMock(value=lambda: False),
+            'roto_lips_outer': MagicMock(value=lambda: False),
+            'roto_lips_inner': MagicMock(value=lambda: False),
+            'roto_left_eye': MagicMock(value=lambda: False),
+            'roto_right_eye': MagicMock(value=lambda: False),
+            'roto_left_iris': MagicMock(value=lambda: False),
+            'roto_right_iris': MagicMock(value=lambda: False),
+            'roto_left_eyebrow': MagicMock(value=lambda: False),
+            'roto_right_eyebrow': MagicMock(value=lambda: False),
+        }
+        mock_node.__getitem__.side_effect = lambda key: knobs[key]
+
+        names = nuke_tracker.get_names_to_track_for_analysis(mock_node)
+
+        self.assertEqual(set(names), set(nuke_tracker.get_roto_export_contour_names()))
+        self.assertIn("Lips_Inner", names)
+        self.assertIn("Left_Eye", names)
+        self.assertIn("Nose_Left_Nostril", names)
 
     class _FakeAnimCurve:
         def __init__(self):
@@ -427,6 +461,67 @@ class TestTrackerRefinement(unittest.TestCase):
             mock_center.getPositionAnimCurve.assert_called()
             mock_lt.getPositionAnimCurve.assert_not_called()
             mock_rt.getPositionAnimCurve.assert_not_called()
+
+    def test_generate_roto_node_builds_at_first_frame_and_restores_current_frame(self):
+        """Creating a Roto node from a later timeline frame must not stamp first-frame coordinates there."""
+        import json
+
+        mock_nuke.frame.return_value = 10
+
+        mock_parent = MagicMock()
+        mock_parent.name.return_value = "FaceTrackerRoto"
+        mock_parent.parent.return_value = MagicMock()
+
+        knobs = {
+            'roto_oval': MagicMock(value=lambda: True),
+            'roto_nose_bridge': MagicMock(value=lambda: False),
+            'roto_left_nostril': MagicMock(value=lambda: False),
+            'roto_right_nostril': MagicMock(value=lambda: False),
+            'roto_lips_outer': MagicMock(value=lambda: False),
+            'roto_lips_inner': MagicMock(value=lambda: False),
+            'roto_left_eye': MagicMock(value=lambda: False),
+            'roto_right_eye': MagicMock(value=lambda: False),
+            'roto_left_iris': MagicMock(value=lambda: False),
+            'roto_right_iris': MagicMock(value=lambda: False),
+            'roto_left_eyebrow': MagicMock(value=lambda: False),
+            'roto_right_eyebrow': MagicMock(value=lambda: False),
+            'roto_bezier': MagicMock(value=lambda: True),
+            'start_frame': MagicMock(value=lambda: 1),
+            'end_frame': MagicMock(value=lambda: 10),
+        }
+        mock_parent.__getitem__.side_effect = lambda key: knobs[key]
+
+        dummy_roto_data = {
+            "Face_Oval": {
+                "1": [[100.0, 200.0], [150.0, 250.0]],
+                "10": [[110.0, 210.0], [160.0, 260.0]]
+            }
+        }
+
+        mock_rp = MagicMock()
+        sys.modules['nuke.rotopaint'] = mock_rp
+        mock_nuke.rotopaint = mock_rp
+        mock_rp.AnimControlPoint.side_effect = lambda x, y: TestTrackerRefinement._FakeControlPoint()
+
+        appended_points = []
+        mock_shape = MagicMock()
+        mock_shape.append.side_effect = lambda item: appended_points.append(item)
+        mock_shape.__getitem__.side_effect = lambda idx: appended_points[idx]
+        mock_rp.Shape.return_value = mock_shape
+
+        mock_nuke.allNodes.return_value = []
+        mock_nuke.createNode.return_value = MagicMock()
+
+        with patch("os.path.exists", return_value=True), \
+             patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(dummy_roto_data))):
+            success = nuke_tracker.generate_roto_node(mock_parent, "dummy_roto.json", 1920, 1080)
+
+        self.assertTrue(success)
+        frame_set_calls = [call.args[0] for call in mock_nuke.frame.call_args_list if call.args]
+        self.assertEqual(frame_set_calls[0], 1)
+        self.assertEqual(frame_set_calls[-1], 10)
+        self.assertIn((10, 110.0), appended_points[0].center.curves[0].keys)
+        self.assertIn((10, 210.0), appended_points[0].center.curves[1].keys)
 
     def test_generate_roto_node_nose_bridge_uses_open_contour_key(self):
         """Nose bridge roto should use the contour key and avoid closed-shape tangents."""

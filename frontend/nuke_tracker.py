@@ -202,24 +202,30 @@ def get_active_tracker_parts(node):
     return active_parts
 
 
+ROTO_CONTOUR_OPTIONS = (
+    ("roto_oval", "Face_Oval"),
+    ("roto_lips_outer", "Lips_Outer"),
+    ("roto_lips_inner", "Lips_Inner"),
+    ("roto_left_eye", "Left_Eye"),
+    ("roto_right_eye", "Right_Eye"),
+    ("roto_left_eyebrow", "Left_Eyebrow"),
+    ("roto_right_eyebrow", "Right_Eyebrow"),
+    ("roto_left_iris", "Left_Iris"),
+    ("roto_right_iris", "Right_Iris"),
+    ("roto_nose_bridge", "Nose_Bridge_Contour"),
+    ("roto_left_nostril", "Nose_Left_Nostril"),
+    ("roto_right_nostril", "Nose_Right_Nostril"),
+)
+
+
+def get_roto_export_contour_names():
+    return [contour_name for _, contour_name in ROTO_CONTOUR_OPTIONS]
+
+
 def get_selected_roto_contours(node):
     selected_contours = []
-    knob_to_contour = (
-        ("roto_oval", "Face_Oval"),
-        ("roto_lips_outer", "Lips_Outer"),
-        ("roto_lips_inner", "Lips_Inner"),
-        ("roto_left_eye", "Left_Eye"),
-        ("roto_right_eye", "Right_Eye"),
-        ("roto_left_eyebrow", "Left_Eyebrow"),
-        ("roto_right_eyebrow", "Right_Eyebrow"),
-        ("roto_left_iris", "Left_Iris"),
-        ("roto_right_iris", "Right_Iris"),
-        ("roto_nose_bridge", "Nose_Bridge_Contour"),
-        ("roto_left_nostril", "Nose_Left_Nostril"),
-        ("roto_right_nostril", "Nose_Right_Nostril"),
-    )
 
-    for knob_name, contour_name in knob_to_contour:
+    for knob_name, contour_name in ROTO_CONTOUR_OPTIONS:
         try:
             if node[knob_name].value():
                 selected_contours.append(contour_name)
@@ -227,6 +233,18 @@ def get_selected_roto_contours(node):
             pass
 
     return selected_contours
+
+
+def get_names_to_track_for_analysis(node):
+    density = node['landmark_density'].value()
+    active_parts = get_active_tracker_parts(node)
+    selected_names = list(landmarks_config.get_landmarks_for_density(density, active_parts).keys())
+
+    # Roto export choices can be changed after tracking, so record every contour
+    # exposed by the Roto tab during analysis and filter only during export.
+    selected_names.extend(get_roto_export_contour_names())
+
+    return list(dict.fromkeys(selected_names))
 
 
 def create_face_tracker_node():
@@ -547,13 +565,7 @@ def run_tracking_on_node(node):
         nuke.message("Landmarks configuration could not be imported. Please verify backend/landmarks_config.py.")
         return False
 
-    density = node['landmark_density'].value()
-    active_parts = get_active_tracker_parts(node)
-    selected_names = list(landmarks_config.get_landmarks_for_density(density, active_parts).keys())
-    selected_names.extend(get_selected_roto_contours(node))
-
-    # Preserve first occurrence while removing duplicate tracker/roto requests.
-    selected_names = list(dict.fromkeys(selected_names))
+    selected_names = get_names_to_track_for_analysis(node)
     landmarks_str = ",".join(selected_names)
     if not landmarks_str:
         nuke.message("Please select at least one landmark or contour group to track!")
@@ -1593,103 +1605,127 @@ def generate_roto_node(parent_node, json_path, width, height):
         nuke.message("Failed to import nuke.rotopaint. Cannot generate Roto node.")
         return False
 
-    # Deselect all nodes to cleanly connect the new Roto node to our custom node
-    for n in nuke.allNodes():
-        n.setSelected(False)
+    original_frame = None
+    try:
+        original_frame = int(nuke.frame())
+    except Exception:
+        pass
 
-    parent_node.setSelected(True)
+    build_frame = min(
+        int(frame)
+        for frame_data in active_contours.values()
+        for frame in frame_data.keys()
+    )
 
-    # Create the Roto Node in the parent canvas context
-    parent_group = parent_node.parent()
-    with parent_group:
-        roto_node = nuke.createNode('Roto')
-    roto_node.setName(f"Roto_Face_{parent_node.name()}")
-
-    curves_knob = roto_node['curves']
-    root_layer = curves_knob.rootLayer
-
-    # Process each active contour group
-    for group_name, frame_data in active_contours.items():
-        sorted_frames = sorted([int(f) for f in frame_data.keys()])
-        if not sorted_frames:
-            continue
-
-        first_frame = sorted_frames[0]
-        first_points = frame_data[str(first_frame)]
-        num_points = len(first_points)
-
-        # 1. Create the Shape object
-        shape = rp.Shape(curves_knob)
-        shape.name = group_name
-
-        is_closed = group_name not in getattr(landmarks_config, "OPEN_CONTOUR_GROUPS", set())
-
-        # Set shape closure using the low-level _curvelib API
+    try:
         try:
-            import _curvelib
-            shape.getAttributes().set(0, _curvelib.AnimAttributes.kClosedAttribute, 1.0 if is_closed else 0.0)
-        except Exception as e:
-            print(f"[NukeFaceTracker] Failed to set shape closed attribute via _curvelib: {e}")
+            nuke.frame(build_frame)
+        except Exception:
+            pass
 
-        # 2. Add control points initialized at first frame coordinates
-        for coords in first_points:
-            cp = rp.AnimControlPoint(coords[0], coords[1])
-            shape.append(cp)
+        # Deselect all nodes to cleanly connect the new Roto node to our custom node
+        for n in nuke.allNodes():
+            n.setSelected(False)
 
-        # Add the shape to the root layer first so its curves are registered with the knob
-        root_layer.append(shape)
+        parent_node.setSelected(True)
 
-        # 3. Animate each control point over the available frames
-        for frame in sorted_frames:
-            points = frame_data[str(frame)]
-            if len(points) != num_points:
-                continue # Safety skip
+        # Create the Roto Node in the parent canvas context
+        parent_group = parent_node.parent()
+        with parent_group:
+            roto_node = nuke.createNode('Roto')
+        roto_node.setName(f"Roto_Face_{parent_node.name()}")
 
-            for idx, coords in enumerate(points):
-                shape_point = shape[idx]
-                anim_point = shape_point.center
+        curves_knob = roto_node['curves']
+        root_layer = curves_knob.rootLayer
 
-                # Set coordinate keyframes using AnimCurve.addKey
-                _add_position_key(anim_point, frame, coords[0], coords[1])
+        # Process each active contour group
+        for group_name, frame_data in active_contours.items():
+            sorted_frames = sorted([int(f) for f in frame_data.keys()])
+            if not sorted_frames:
+                continue
 
-                feather_center = _get_keyable_anim_point(
-                    shape_point,
-                    ("featherCenter", "featherPoint", "feather")
-                )
-                if feather_center is not None:
-                    # Nuke feather points are relative to the main control point.
-                    # Keep the feather edge aligned with the main spline by keying zero offset.
-                    _add_position_key(feather_center, frame, 0.0, 0.0)
+            first_frame = sorted_frames[0]
+            first_points = frame_data[str(first_frame)]
+            num_points = len(first_points)
 
-                # If Bezier is enabled and there are enough points, calculate smooth tangents
-                if is_closed and bezier_enabled and num_points > 2:
-                    tx, ty = _calculate_closed_bezier_tangent(points, idx)
+            # 1. Create the Shape object
+            shape = rp.Shape(curves_knob)
+            shape.name = group_name
 
-                    # Left tangent handle (incoming)
-                    _add_position_key(shape_point.leftTangent, frame, -tx, -ty)
+            is_closed = group_name not in getattr(landmarks_config, "OPEN_CONTOUR_GROUPS", set())
 
-                    # Right tangent handle (outgoing)
-                    _add_position_key(shape_point.rightTangent, frame, tx, ty)
+            # Set shape closure using the low-level _curvelib API
+            try:
+                import _curvelib
+                shape.getAttributes().set(0, _curvelib.AnimAttributes.kClosedAttribute, 1.0 if is_closed else 0.0)
+            except Exception as e:
+                print(f"[NukeFaceTracker] Failed to set shape closed attribute via _curvelib: {e}")
 
-                    feather_left_tangent = _get_keyable_anim_point(
+            # 2. Add control points initialized at first frame coordinates
+            for coords in first_points:
+                cp = rp.AnimControlPoint(coords[0], coords[1])
+                shape.append(cp)
+
+            # Add the shape to the root layer first so its curves are registered with the knob
+            root_layer.append(shape)
+
+            # 3. Animate each control point over the available frames
+            for frame in sorted_frames:
+                points = frame_data[str(frame)]
+                if len(points) != num_points:
+                    continue # Safety skip
+
+                for idx, coords in enumerate(points):
+                    shape_point = shape[idx]
+                    anim_point = shape_point.center
+
+                    # Set coordinate keyframes using AnimCurve.addKey
+                    _add_position_key(anim_point, frame, coords[0], coords[1])
+
+                    feather_center = _get_keyable_anim_point(
                         shape_point,
-                        ("featherLeftTangent", "leftFeatherTangent", "featherLeft")
+                        ("featherCenter", "featherPoint", "feather")
                     )
-                    if feather_left_tangent is not None:
-                        _add_position_key(feather_left_tangent, frame, -tx, -ty)
+                    if feather_center is not None:
+                        # Nuke feather points are relative to the main control point.
+                        # Keep the feather edge aligned with the main spline by keying zero offset.
+                        _add_position_key(feather_center, frame, 0.0, 0.0)
 
-                    feather_right_tangent = _get_keyable_anim_point(
-                        shape_point,
-                        ("featherRightTangent", "rightFeatherTangent", "featherRight")
-                    )
-                    if feather_right_tangent is not None:
-                        _add_position_key(feather_right_tangent, frame, tx, ty)
+                    # If Bezier is enabled and there are enough points, calculate smooth tangents
+                    if is_closed and bezier_enabled and num_points > 2:
+                        tx, ty = _calculate_closed_bezier_tangent(points, idx)
 
-    # Force Nuke to evaluate and refresh the curves in the viewer
-    curves_knob.changed()
+                        # Left tangent handle (incoming)
+                        _add_position_key(shape_point.leftTangent, frame, -tx, -ty)
 
-    parent_node.setSelected(True)
-    roto_node.setSelected(True)
+                        # Right tangent handle (outgoing)
+                        _add_position_key(shape_point.rightTangent, frame, tx, ty)
+
+                        feather_left_tangent = _get_keyable_anim_point(
+                            shape_point,
+                            ("featherLeftTangent", "leftFeatherTangent", "featherLeft")
+                        )
+                        if feather_left_tangent is not None:
+                            _add_position_key(feather_left_tangent, frame, -tx, -ty)
+
+                        feather_right_tangent = _get_keyable_anim_point(
+                            shape_point,
+                            ("featherRightTangent", "rightFeatherTangent", "featherRight")
+                        )
+                        if feather_right_tangent is not None:
+                            _add_position_key(feather_right_tangent, frame, tx, ty)
+
+        # Force Nuke to evaluate and refresh the curves in the viewer
+        curves_knob.changed()
+
+        parent_node.setSelected(True)
+        roto_node.setSelected(True)
+    finally:
+        if original_frame is not None:
+            try:
+                nuke.frame(original_frame)
+            except Exception:
+                pass
 
     return True
 
