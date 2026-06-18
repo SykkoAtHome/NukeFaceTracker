@@ -34,6 +34,12 @@ class TestNukeFaceTracker(unittest.TestCase):
         self.assertEqual(res["Face_Oval_0"], 10) # 10 is index 0 in Face_Oval
         self.assertEqual(res["Lips_Outer_1"], 185) # 185 is index 1 in Lips_Outer
 
+    def test_get_landmarks_by_names_surface(self):
+        """Test dynamic surface landmark name resolution."""
+        res = landmarks_config.get_landmarks_by_names(["Surface_Face_Shape_0", "Surface_Nose_0"])
+        self.assertEqual(res["Surface_Face_Shape_0"], landmarks_config.FACE_SHAPE_SURFACE_INDICES[0])
+        self.assertEqual(res["Surface_Nose_0"], landmarks_config.NOSE_SURFACE_INDICES[0])
+
     def test_get_contour_groups_by_names_all(self):
         """Test retrieving all contour groups when no names are specified."""
         res = landmarks_config.get_contour_groups_by_names([])
@@ -141,12 +147,45 @@ class TestNukeFaceTracker(unittest.TestCase):
         self.assertIn("Left_Iris_0", res)
         self.assertIn("Right_Iris_0", res)
 
+    def test_get_landmarks_for_density_surface(self):
+        """Verify surface resolver returns broader facial region points without creating Roto contours."""
+        res = landmarks_config.get_landmarks_for_density("Surface (Face Regions)", ["Face Shape"])
+
+        self.assertIn("Surface_Face_Shape_0", res)
+        self.assertIn(323, res.values()) # Cheek region coverage
+        self.assertIn(454, res.values()) # Opposite cheek region coverage
+        self.assertNotIn("Face_Oval_0", res)
+        self.assertFalse(any(name in landmarks_config.CONTOUR_GROUPS for name in res))
+
     def test_get_landmarks_for_density_full(self):
         """Verify full resolver returns exact partition mesh indices prefixed with Mesh_."""
         res = landmarks_config.get_landmarks_for_density("Full (Entire Mesh & Iris - 478 pts)", ["Eyebrows"])
         expected_keys = {f"Mesh_{idx}" for idx in landmarks_config.EYEBROWS_MESH_INDICES}
         self.assertEqual(set(res.keys()), expected_keys)
         self.assertEqual(res["Mesh_70"], 70)
+
+    def test_get_landmarks_for_analysis_includes_export_superset(self):
+        """Analysis should record enough data for later Sparse/Dense/Surface/Full exports."""
+        res = landmarks_config.get_landmarks_for_analysis("Sparse", ["Face Shape"])
+
+        self.assertIn("Chin", res)
+        self.assertIn("Face_Oval_0", res)
+        self.assertIn("Surface_Face_Shape_0", res)
+        self.assertIn("Mesh_152", res)
+        self.assertIn("Nose_Tip", res)
+        self.assertIn("Left_Eye_0", res)
+        self.assertIn("Surface_Nose_0", res)
+        self.assertIn("Mesh_477", res)
+
+    def test_roto_contours_are_explicit_subset_of_contour_groups(self):
+        """Roto should remain limited to spline-friendly contour groups, not surface point clouds."""
+        roto_names = landmarks_config.get_roto_contour_names()
+
+        self.assertTrue(roto_names)
+        self.assertTrue(set(roto_names).issubset(set(landmarks_config.CONTOUR_GROUPS.keys())))
+        self.assertNotIn("Left_Cheek_Bone", roto_names)
+        self.assertNotIn("Right_Cheek_Bone", roto_names)
+        self.assertFalse(any(name.startswith("Surface_") for name in roto_names))
 
     def test_iris_contours_exclude_centers(self):
         """Verify that Left_Iris and Right_Iris contour lists have exactly 4 points and do not include the centers."""

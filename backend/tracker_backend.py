@@ -231,15 +231,10 @@ def main():
 
         args = parser.parse_args()
 
-        # Resolve selected landmarks and contour groups to track
-        selected_names = []
-        if args.landmarks:
-            selected_names = [name.strip() for name in args.landmarks.split(",") if name.strip()]
-
-        # Classify each selected name as either a contour group or an individual landmark
-        contours_to_track = {name: landmarks_config.CONTOUR_GROUPS[name] for name in selected_names if name in landmarks_config.CONTOUR_GROUPS}
-        individual_names = [name for name in selected_names if name not in landmarks_config.CONTOUR_GROUPS]
-        landmarks_to_track = landmarks_config.get_landmarks_by_names(individual_names)
+        # Always track the full backend payload. Frontend export options decide
+        # which subset is turned into Tracker4 points or Roto splines later.
+        contours_to_track = dict(landmarks_config.CONTOUR_GROUPS)
+        landmarks_to_track = landmarks_config.get_landmarks_for_analysis()
 
         # Determine the frame sequence
         if args.backward:

@@ -56,10 +56,43 @@ class TestTrackerRefinement(unittest.TestCase):
 
         names = nuke_tracker.get_names_to_track_for_analysis(mock_node)
 
-        self.assertEqual(set(names), set(nuke_tracker.get_roto_export_contour_names()))
+        self.assertTrue(set(nuke_tracker.get_roto_export_contour_names()).issubset(set(names)))
         self.assertIn("Lips_Inner", names)
         self.assertIn("Left_Eye", names)
         self.assertIn("Nose_Left_Nostril", names)
+
+    def test_analysis_tracks_tracker_export_superset(self):
+        """Tracking stores enough tracker points for later Surface and Full exports."""
+        mock_node = MagicMock()
+
+        knobs = {
+            'landmark_density': MagicMock(value=lambda: "Sparse (Standard)"),
+            'track_nose': MagicMock(value=lambda: False),
+            'track_eyes': MagicMock(value=lambda: False),
+            'track_eyebrows': MagicMock(value=lambda: False),
+            'track_mouth': MagicMock(value=lambda: False),
+            'track_contour': MagicMock(value=lambda: True),
+            'roto_oval': MagicMock(value=lambda: False),
+            'roto_nose_bridge': MagicMock(value=lambda: False),
+            'roto_left_nostril': MagicMock(value=lambda: False),
+            'roto_right_nostril': MagicMock(value=lambda: False),
+            'roto_lips_outer': MagicMock(value=lambda: False),
+            'roto_lips_inner': MagicMock(value=lambda: False),
+            'roto_left_eye': MagicMock(value=lambda: False),
+            'roto_right_eye': MagicMock(value=lambda: False),
+            'roto_left_iris': MagicMock(value=lambda: False),
+            'roto_right_iris': MagicMock(value=lambda: False),
+            'roto_left_eyebrow': MagicMock(value=lambda: False),
+            'roto_right_eyebrow': MagicMock(value=lambda: False),
+        }
+        mock_node.__getitem__.side_effect = lambda key: knobs[key]
+
+        names = nuke_tracker.get_names_to_track_for_analysis(mock_node)
+
+        self.assertIn("Chin", names)
+        self.assertIn("Face_Oval_0", names)
+        self.assertIn("Surface_Face_Shape_0", names)
+        self.assertIn("Mesh_152", names)
 
     class _FakeAnimCurve:
         def __init__(self):
@@ -236,6 +269,7 @@ class TestTrackerRefinement(unittest.TestCase):
             "Nose_Tip": {"1": [10.0, 20.0]},
             "Face_Oval_0": {"1": [30.0, 40.0]},
             "Left_Eye_0": {"1": [50.0, 60.0]},
+            "Surface_Face_Shape_0": {"1": [55.0, 65.0]},
             "Mesh_0": {"1": [70.0, 80.0]},
         }
 
@@ -258,7 +292,12 @@ class TestTrackerRefinement(unittest.TestCase):
             success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
             self.assertTrue(success)
 
-            # Case C: Full mode (now respects UI checkboxes per requirements)
+            # Case C: Surface, Face Shape selected
+            set_knobs("Surface", False, False, False, False, True)
+            success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
+            self.assertTrue(success)
+
+            # Case D: Full mode (now respects UI checkboxes per requirements)
             set_knobs("Full", True, True, True, True, True)
             success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
             self.assertTrue(success)

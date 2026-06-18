@@ -50,6 +50,8 @@ LANDMARK_GROUPS = {
     }
 }
 
+SPARSE_PART_TO_LANDMARKS = LANDMARK_GROUPS
+
 # --- DENSE CONTOUR GROUPS (Sequential tracker indices tracing face features) ---
 CONTOUR_GROUPS = {
     "Face_Oval": [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109],
@@ -69,13 +71,51 @@ CONTOUR_GROUPS = {
     "Right_Cheek_Bone": [234, 127, 162]
 }
 
+NOSE_CONTOUR_GROUP_NAMES = ("Nose_Bridge_Contour", "Nose_Left_Nostril", "Nose_Right_Nostril")
+EYE_CONTOUR_GROUP_NAMES = ("Left_Eye", "Right_Eye", "Left_Iris", "Right_Iris")
+EYEBROW_CONTOUR_GROUP_NAMES = ("Left_Eyebrow", "Right_Eyebrow")
+MOUTH_CONTOUR_GROUP_NAMES = ("Lips_Outer", "Lips_Inner")
+FACE_SHAPE_CONTOUR_GROUP_NAMES = ("Face_Oval", "Left_Cheek_Bone", "Right_Cheek_Bone")
+
 DENSE_PART_TO_CONTOURS = {
-    "Nose": ["Nose_Bridge_Contour", "Nose_Left_Nostril", "Nose_Right_Nostril"],
-    "Eyes": ["Left_Eye", "Right_Eye", "Left_Iris", "Right_Iris"],
-    "Eyebrows": ["Left_Eyebrow", "Right_Eyebrow"],
-    "Mouth": ["Lips_Outer", "Lips_Inner"],
-    "Face Shape": ["Face_Oval", "Left_Cheek_Bone", "Right_Cheek_Bone"],
+    "Nose": NOSE_CONTOUR_GROUP_NAMES,
+    "Eyes": EYE_CONTOUR_GROUP_NAMES,
+    "Eyebrows": EYEBROW_CONTOUR_GROUP_NAMES,
+    "Mouth": MOUTH_CONTOUR_GROUP_NAMES,
+    "Face Shape": FACE_SHAPE_CONTOUR_GROUP_NAMES,
 }
+
+# Roto intentionally exposes only spline-friendly facial feature contours.
+# Surface groups below are tracker-only point clouds and must not be exported as Roto shapes.
+ROTO_CONTOUR_GROUP_NAMES = (
+    "Face_Oval",
+    "Nose_Bridge_Contour",
+    "Nose_Left_Nostril",
+    "Nose_Right_Nostril",
+    "Lips_Outer",
+    "Lips_Inner",
+    "Left_Eye",
+    "Right_Eye",
+    "Left_Iris",
+    "Right_Iris",
+    "Left_Eyebrow",
+    "Right_Eyebrow",
+)
+
+ROTO_CONTOUR_KNOB_SPECS = (
+    ("roto_oval", "Face_Oval", "Face Oval (36 pts)       ", True),
+    ("roto_nose_bridge", "Nose_Bridge_Contour", "Nose Bridge (5 pts)", False),
+    ("roto_left_nostril", "Nose_Left_Nostril", "Left Nostril (6 pts)     ", False),
+    ("roto_right_nostril", "Nose_Right_Nostril", "Right Nostril (6 pts)", False),
+    ("roto_lips_outer", "Lips_Outer", "Lips Outer (20 pts)      ", True),
+    ("roto_lips_inner", "Lips_Inner", "Lips Inner (20 pts)", False),
+    ("roto_left_eye", "Left_Eye", "Left Eye (16 pts)        ", False),
+    ("roto_right_eye", "Right_Eye", "Right Eye (16 pts)", False),
+    ("roto_left_iris", "Left_Iris", "Left Iris (4 pts)          ", False),
+    ("roto_right_iris", "Right_Iris", "Right Iris (4 pts)", False),
+    ("roto_left_eyebrow", "Left_Eyebrow", "Left Eyebrow (10 pts)   ", False),
+    ("roto_right_eyebrow", "Right_Eyebrow", "Right Eyebrow (10 pts)", False),
+)
 
 OPEN_CONTOUR_GROUPS = {
     "Nose_Bridge_Contour",
@@ -106,6 +146,97 @@ NOSE_MESH_INDICES = [
 # Face shape contains all indices in 0..477 that are not part of eyebrows, eyes, lips, or nose
 FACE_SHAPE_MESH_INDICES = sorted(list(set(range(478)) - set(EYEBROWS_MESH_INDICES) - set(EYES_MESH_INDICES) - set(LIPS_MESH_INDICES) - set(NOSE_MESH_INDICES)))
 
+NOSE_SURFACE_INDICES = [
+    1, 2, 3, 4, 5, 6, 45, 48, 64, 97, 98, 115, 122, 129, 131, 168, 193, 195, 197, 220,
+    275, 278, 294, 326, 327, 344, 351, 358, 360, 440
+]
+
+EYES_SURFACE_INDICES = [
+    7, 22, 23, 24, 33, 110, 130, 133, 144, 145, 153, 154, 155, 157, 158, 159, 160, 161,
+    163, 173, 246, 247, 249, 263, 339, 341, 359, 362, 373, 374, 380, 381, 382, 384, 385,
+    386, 387, 388, 390, 398, 466, 467, 468, 469, 470, 471, 472, 473, 474, 475, 476, 477
+]
+
+EYEBROWS_SURFACE_INDICES = EYEBROWS_MESH_INDICES
+
+MOUTH_SURFACE_INDICES = [
+    0, 11, 12, 13, 14, 15, 16, 17, 37, 38, 39, 40, 41, 42, 61, 62, 72, 73, 74, 76, 77,
+    78, 80, 81, 82, 84, 85, 86, 87, 88, 91, 95, 96, 146, 178, 179, 180, 181, 183, 184,
+    185, 191, 267, 268, 269, 270, 271, 272, 291, 292, 302, 303, 304, 306, 307, 308,
+    310, 311, 312, 314, 315, 316, 317, 318, 321, 324, 325, 375, 402, 403, 404, 405,
+    407, 408, 409, 415
+]
+
+FACE_SHAPE_SURFACE_INDICES = [
+    9, 10, 21, 50, 54, 58, 67, 69, 93, 101, 104, 108, 109, 116, 117, 118, 119, 120,
+    123, 124, 127, 132, 136, 137, 138, 139, 147, 148, 149, 150, 151, 152, 162, 172,
+    176, 177, 187, 192, 203, 205, 206, 207, 210, 211, 212, 213, 214, 215, 216, 227,
+    228, 229, 230, 231, 232, 234, 280, 299, 323, 330, 333, 337, 338, 346, 347, 348,
+    349, 350, 352, 355, 356, 357, 361, 363, 364, 365, 366, 367, 376, 377, 378, 379,
+    389, 397, 400, 401, 411, 416, 423, 425, 426, 427, 430, 431, 432, 433, 434, 435,
+    436, 454
+]
+
+SURFACE_PART_TO_INDICES = {
+    "Nose": NOSE_SURFACE_INDICES,
+    "Eyes": EYES_SURFACE_INDICES,
+    "Eyebrows": EYEBROWS_SURFACE_INDICES,
+    "Mouth": MOUTH_SURFACE_INDICES,
+    "Face Shape": FACE_SHAPE_SURFACE_INDICES,
+}
+
+FULL_PART_TO_INDICES = {
+    "Nose": NOSE_MESH_INDICES,
+    "Eyes": EYES_MESH_INDICES,
+    "Eyebrows": EYEBROWS_MESH_INDICES,
+    "Mouth": LIPS_MESH_INDICES,
+    "Face Shape": FACE_SHAPE_MESH_INDICES,
+}
+
+SURFACE_PART_PREFIXES = {
+    "Nose": "Surface_Nose",
+    "Eyes": "Surface_Eye_Area",
+    "Eyebrows": "Surface_Eyebrow_Area",
+    "Mouth": "Surface_Mouth_Area",
+    "Face Shape": "Surface_Face_Shape",
+}
+
+TRACKER_DENSITY_LABELS = [
+    "Sparse (Standard)",
+    "Dense (Feature Contours)",
+    "Surface (Face Regions)",
+    "Full (Entire Mesh & Iris - 478 pts)",
+]
+
+
+def get_roto_contour_names():
+    return list(ROTO_CONTOUR_GROUP_NAMES)
+
+
+def _density_key(density):
+    if "Full" in density:
+        return "full"
+    if "Surface" in density:
+        return "surface"
+    if "Dense" in density or "Contour" in density:
+        return "dense"
+    return "sparse"
+
+
+def _add_indexed_landmarks(resolved, prefix, indices):
+    for i, idx in enumerate(indices):
+        resolved[f"{prefix}_{i}"] = idx
+
+
+def _merge_landmarks(target, source):
+    for name, idx in source.items():
+        target[name] = idx
+
+
+SURFACE_LANDMARKS = {}
+for part_name, indices in SURFACE_PART_TO_INDICES.items():
+    _add_indexed_landmarks(SURFACE_LANDMARKS, SURFACE_PART_PREFIXES[part_name], indices)
+
 
 # --- DYNAMIC LANDMARK RESOLVER ---
 def get_landmarks_for_density(density, active_parts):
@@ -115,37 +246,55 @@ def get_landmarks_for_density(density, active_parts):
     """
     resolved = {}
     active_set = set(active_parts)
+    density_key = _density_key(density)
 
-    if "Sparse" in density:
-        for part, landmarks in LANDMARK_GROUPS.items():
+    if density_key == "sparse":
+        for part, landmarks in SPARSE_PART_TO_LANDMARKS.items():
             if part in active_set:
                 for name, idx in landmarks.items():
                     resolved[name] = idx
 
-    elif "Dense" in density:
+    elif density_key == "dense":
         if "Nose" in active_set:
-            for name, idx in LANDMARK_GROUPS["Nose"].items():
+            for name, idx in SPARSE_PART_TO_LANDMARKS["Nose"].items():
                 resolved[name] = idx
 
         for part, contour_names in DENSE_PART_TO_CONTOURS.items():
             if part in active_set:
                 for contour_name in contour_names:
                     pts = CONTOUR_GROUPS[contour_name]
-                    for i, idx in enumerate(pts):
-                        resolved[f"{contour_name}_{i}"] = idx
+                    _add_indexed_landmarks(resolved, contour_name, pts)
 
-    elif "Full" in density:
-        part_to_mesh_indices = {
-            "Nose": NOSE_MESH_INDICES,
-            "Eyes": EYES_MESH_INDICES,
-            "Eyebrows": EYEBROWS_MESH_INDICES,
-            "Mouth": LIPS_MESH_INDICES,
-            "Face Shape": FACE_SHAPE_MESH_INDICES
-        }
-        for part, indices in part_to_mesh_indices.items():
+    elif density_key == "surface":
+        for part, indices in SURFACE_PART_TO_INDICES.items():
+            if part in active_set:
+                _add_indexed_landmarks(resolved, SURFACE_PART_PREFIXES[part], indices)
+
+    elif density_key == "full":
+        for part, indices in FULL_PART_TO_INDICES.items():
             if part in active_set:
                 for idx in indices:
                     resolved[f"Mesh_{idx}"] = idx
+
+    return resolved
+
+
+def get_all_part_names():
+    return list(SPARSE_PART_TO_LANDMARKS.keys())
+
+
+def get_landmarks_for_analysis(density=None, active_parts=None):
+    """
+    Returns the tracker data that should be recorded during analysis.
+
+    Backend tracking records the full export superset. Tracker and Roto exports
+    filter this data later according to the user's current frontend choices.
+    """
+    resolved = {}
+    parts = get_all_part_names()
+
+    for analysis_density in ("Sparse", "Dense", "Surface", "Full"):
+        _merge_landmarks(resolved, get_landmarks_for_density(analysis_density, parts))
 
     return resolved
 
@@ -168,6 +317,8 @@ def get_landmarks_by_names(names):
     for name in names:
         if name in ALL_LANDMARKS:
             result[name] = ALL_LANDMARKS[name]
+        elif name in SURFACE_LANDMARKS:
+            result[name] = SURFACE_LANDMARKS[name]
         elif name.startswith("Mesh_"):
             try:
                 idx = int(name.split("_")[1])

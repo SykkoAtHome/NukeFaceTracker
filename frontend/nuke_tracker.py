@@ -202,21 +202,32 @@ def get_active_tracker_parts(node):
     return active_parts
 
 
-ROTO_CONTOUR_OPTIONS = (
-    ("roto_oval", "Face_Oval"),
-    ("roto_lips_outer", "Lips_Outer"),
-    ("roto_lips_inner", "Lips_Inner"),
-    ("roto_left_eye", "Left_Eye"),
-    ("roto_right_eye", "Right_Eye"),
-    ("roto_left_eyebrow", "Left_Eyebrow"),
-    ("roto_right_eyebrow", "Right_Eyebrow"),
-    ("roto_left_iris", "Left_Iris"),
-    ("roto_right_iris", "Right_Iris"),
-    ("roto_nose_bridge", "Nose_Bridge_Contour"),
-    ("roto_left_nostril", "Nose_Left_Nostril"),
-    ("roto_right_nostril", "Nose_Right_Nostril"),
+FALLBACK_ROTO_CONTOUR_KNOB_SPECS = (
+    ("roto_oval", "Face_Oval", "Face Oval (36 pts)       ", True),
+    ("roto_nose_bridge", "Nose_Bridge_Contour", "Nose Bridge (5 pts)", False),
+    ("roto_left_nostril", "Nose_Left_Nostril", "Left Nostril (6 pts)     ", False),
+    ("roto_right_nostril", "Nose_Right_Nostril", "Right Nostril (6 pts)", False),
+    ("roto_lips_outer", "Lips_Outer", "Lips Outer (20 pts)      ", True),
+    ("roto_lips_inner", "Lips_Inner", "Lips Inner (20 pts)", False),
+    ("roto_left_eye", "Left_Eye", "Left Eye (16 pts)        ", False),
+    ("roto_right_eye", "Right_Eye", "Right Eye (16 pts)", False),
+    ("roto_left_iris", "Left_Iris", "Left Iris (4 pts)          ", False),
+    ("roto_right_iris", "Right_Iris", "Right Iris (4 pts)", False),
+    ("roto_left_eyebrow", "Left_Eyebrow", "Left Eyebrow (10 pts)   ", False),
+    ("roto_right_eyebrow", "Right_Eyebrow", "Right Eyebrow (10 pts)", False),
 )
 
+
+def get_roto_contour_knob_specs():
+    if landmarks_config and hasattr(landmarks_config, "ROTO_CONTOUR_KNOB_SPECS"):
+        return landmarks_config.ROTO_CONTOUR_KNOB_SPECS
+    return FALLBACK_ROTO_CONTOUR_KNOB_SPECS
+
+
+ROTO_CONTOUR_OPTIONS = tuple(
+    (knob_name, contour_name)
+    for knob_name, contour_name, _, _ in get_roto_contour_knob_specs()
+)
 
 def get_roto_export_contour_names():
     return [contour_name for _, contour_name in ROTO_CONTOUR_OPTIONS]
@@ -236,9 +247,12 @@ def get_selected_roto_contours(node):
 
 
 def get_names_to_track_for_analysis(node):
-    density = node['landmark_density'].value()
-    active_parts = get_active_tracker_parts(node)
-    selected_names = list(landmarks_config.get_landmarks_for_density(density, active_parts).keys())
+    if hasattr(landmarks_config, "get_landmarks_for_analysis"):
+        selected_names = list(landmarks_config.get_landmarks_for_analysis().keys())
+    else:
+        density = node['landmark_density'].value()
+        active_parts = get_active_tracker_parts(node)
+        selected_names = list(landmarks_config.get_landmarks_for_density(density, active_parts).keys())
 
     # Roto export choices can be changed after tracking, so record every contour
     # exposed by the Roto tab during analysis and filter only during export.
@@ -356,8 +370,13 @@ def create_face_tracker_node():
     tracker_tab = nuke.Tab_Knob("tracker_tab", "Tracker")
     node.addKnob(tracker_tab)
 
-    density_knob = nuke.Enumeration_Knob("landmark_density", "Landmark Density", ["Sparse (Standard - 31 pts)", "Dense (Contours - 149 pts)", "Full (Entire Mesh & Iris - 478 pts)"])
-    density_knob.setTooltip("Sparse: Tracks up to 31 standard facial features (includes Iris Centers).\nDense: Tracks up to 149 sequential contour points (includes Nose Bridge, Nostrils, and Irises).\nFull: Tracks high-fidelity mesh topology (up to 478 points).")
+    density_labels = getattr(
+        landmarks_config,
+        "TRACKER_DENSITY_LABELS",
+        ["Sparse (Standard)", "Dense (Feature Contours)", "Surface (Face Regions)", "Full (Entire Mesh & Iris - 478 pts)"]
+    )
+    density_knob = nuke.Enumeration_Knob("landmark_density", "Landmark Density", density_labels)
+    density_knob.setTooltip("Sparse: standard facial features.\nDense: ordered feature contours for eyes, brows, lips, nose, and face oval.\nSurface: broader facial regions including cheeks, forehead, jaw, and feature surfaces.\nFull: high-fidelity mesh topology (up to 478 points).")
     node.addKnob(density_knob)
 
     divider_landmarks = nuke.Text_Knob("divider_landmarks", "Select Landmarks to Track", "")
@@ -413,56 +432,13 @@ def create_face_tracker_node():
     divider_roto = nuke.Text_Knob("divider_roto_landmarks", "Select Contours for Roto Splines", "")
     node.addKnob(divider_roto)
 
-    roto_oval = nuke.Boolean_Knob("roto_oval", "Face Oval (36 pts)       ", True)
-    roto_nose_bridge = nuke.Boolean_Knob("roto_nose_bridge", "Nose Bridge (5 pts)", False)
-    roto_left_nostril = nuke.Boolean_Knob("roto_left_nostril", "Left Nostril (6 pts)     ", False)
-    roto_right_nostril = nuke.Boolean_Knob("roto_right_nostril", "Right Nostril (6 pts)", False)
-    roto_lips_outer = nuke.Boolean_Knob("roto_lips_outer", "Lips Outer (20 pts)      ", True)
-    roto_lips_inner = nuke.Boolean_Knob("roto_lips_inner", "Lips Inner (20 pts)", False)
-    roto_left_eye = nuke.Boolean_Knob("roto_left_eye", "Left Eye (16 pts)        ", False)
-    roto_right_eye = nuke.Boolean_Knob("roto_right_eye", "Right Eye (16 pts)", False)
-    roto_left_iris = nuke.Boolean_Knob("roto_left_iris", "Left Iris (4 pts)          ", False)
-    roto_right_iris = nuke.Boolean_Knob("roto_right_iris", "Right Iris (4 pts)", False)
-    roto_left_eyebrow = nuke.Boolean_Knob("roto_left_eyebrow", "Left Eyebrow (10 pts)   ", False)
-    roto_right_eyebrow = nuke.Boolean_Knob("roto_right_eyebrow", "Right Eyebrow (10 pts)", False)
-
-    # Configure 2x6 grid layout (Column 1 starts line, Column 2 clears startline)
-    roto_oval.setFlag(nuke.STARTLINE)
-    roto_nose_bridge.clearFlag(nuke.STARTLINE)
-
-    roto_left_nostril.setFlag(nuke.STARTLINE)
-    roto_right_nostril.clearFlag(nuke.STARTLINE)
-
-    roto_lips_outer.setFlag(nuke.STARTLINE)
-    roto_lips_inner.clearFlag(nuke.STARTLINE)
-
-    roto_left_eye.setFlag(nuke.STARTLINE)
-    roto_right_eye.clearFlag(nuke.STARTLINE)
-
-    roto_left_iris.setFlag(nuke.STARTLINE)
-    roto_right_iris.clearFlag(nuke.STARTLINE)
-
-    roto_left_eyebrow.setFlag(nuke.STARTLINE)
-    roto_right_eyebrow.clearFlag(nuke.STARTLINE)
-
-    # Add knobs in row-major order (Column 1, then Column 2)
-    node.addKnob(roto_oval)
-    node.addKnob(roto_nose_bridge)
-
-    node.addKnob(roto_left_nostril)
-    node.addKnob(roto_right_nostril)
-
-    node.addKnob(roto_lips_outer)
-    node.addKnob(roto_lips_inner)
-
-    node.addKnob(roto_left_eye)
-    node.addKnob(roto_right_eye)
-
-    node.addKnob(roto_left_iris)
-    node.addKnob(roto_right_iris)
-
-    node.addKnob(roto_left_eyebrow)
-    node.addKnob(roto_right_eyebrow)
+    for idx, (knob_name, _contour_name, label, default_value) in enumerate(get_roto_contour_knob_specs()):
+        roto_knob = nuke.Boolean_Knob(knob_name, label, default_value)
+        if idx % 2 == 0:
+            roto_knob.setFlag(nuke.STARTLINE)
+        else:
+            roto_knob.clearFlag(nuke.STARTLINE)
+        node.addKnob(roto_knob)
 
     node.addKnob(nuke.Text_Knob("divider_roto_action", "", ""))
 
@@ -784,10 +760,13 @@ def run_tracking_on_node(node):
                 return False
 
             try:
-                selected_landmarks_list = [name.strip() for name in landmarks_str.split(",") if name.strip()]
-                contours_to_track = {name: landmarks_config.CONTOUR_GROUPS[name] for name in selected_landmarks_list if name in landmarks_config.CONTOUR_GROUPS}
-                individual_names = [name for name in selected_landmarks_list if name not in landmarks_config.CONTOUR_GROUPS]
-                landmarks_to_track = landmarks_config.get_landmarks_by_names(individual_names)
+                contours_to_track = dict(landmarks_config.CONTOUR_GROUPS)
+                if hasattr(landmarks_config, "get_landmarks_for_analysis"):
+                    landmarks_to_track = landmarks_config.get_landmarks_for_analysis()
+                else:
+                    selected_landmarks_list = [name.strip() for name in landmarks_str.split(",") if name.strip()]
+                    individual_names = [name for name in selected_landmarks_list if name not in landmarks_config.CONTOUR_GROUPS]
+                    landmarks_to_track = landmarks_config.get_landmarks_by_names(individual_names)
 
                 merged_data = tracker_backend.merge_results(
                     fwd_data,
