@@ -5,37 +5,401 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MediaPipe FaceMesh Landmark Grouper</title>
 <style>
-:root{--bg:#111318;--panel:#191d25;--panel2:#222734;--text:#f1f3f7;--muted:#9aa3b2;--accent:#7cc7ff;--danger:#ff6b6b;--ok:#55d68a;--line:#333949;--dim:.08}
-*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;height:100vh;overflow:hidden}
-header{height:54px;display:flex;align-items:center;gap:16px;padding:0 18px;border-bottom:1px solid var(--line);background:#0e1015} h1{font-size:16px;margin:0}.meta{font-size:12px;color:var(--muted)}
-.app{display:grid;grid-template-columns:390px 1fr 350px;height:calc(100vh - 54px)} aside{background:var(--panel);border-right:1px solid var(--line);overflow:auto;padding:14px} aside.right{border-left:1px solid var(--line);border-right:0} main{position:relative;overflow:hidden;background:radial-gradient(circle at center,#1b202b 0,#101219 72%)}
-canvas{width:100%;height:100%;display:block;cursor:crosshair}.section{border:1px solid var(--line);background:rgba(255,255,255,.025);border-radius:10px;padding:12px;margin-bottom:12px}.section h2{font-size:13px;margin:0 0 10px;color:#dfe6f3}.small{font-size:12px;color:var(--muted);line-height:1.45}.row{display:flex;gap:8px;align-items:center}.col{display:flex;flex-direction:column;gap:8px}
-input,textarea,select,button{font:inherit;border-radius:8px;border:1px solid var(--line);background:#11151d;color:var(--text);padding:9px 10px}input,textarea,select{width:100%}textarea{min-height:210px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;resize:vertical}button{cursor:pointer;background:var(--panel2)}button:hover{filter:brightness(1.15)}button.primary{background:#174e73;border-color:#286b98}button.danger{background:#55272c;border-color:#86414a}button.ok{background:#1f5839;border-color:#2b8252}button.activeBtn{outline:1px solid var(--accent)}
-.parent{border:1px solid var(--line);border-radius:12px;margin-bottom:10px;background:#141923;overflow:hidden}.parentHead{display:flex;align-items:center;gap:8px;padding:10px;background:#1a1f2b;border-bottom:1px solid var(--line)}.parent.collapsed .parentHead{border-bottom:0}.parentName{font-weight:750;flex:1;word-break:break-word}.toggleParent{width:28px;height:28px;padding:0;display:grid;place-items:center;font-weight:750;flex:0 0 auto}.childWrap{padding:8px 8px 10px 18px}.child{border:1px solid var(--line);border-radius:10px;padding:9px;margin-top:8px;background:#11151d}.child.active{border-color:var(--accent);box-shadow:0 0 0 1px rgba(124,199,255,.35) inset}.childTitle{display:flex;gap:8px;align-items:center}.childName{font-weight:650;font-size:13px;word-break:break-word;flex:1}.badge{font-size:11px;color:#c9d3e1;background:#2a3040;padding:2px 7px;border-radius:999px}.dot{width:14px;height:14px;border-radius:99px;border:1px solid rgba(255,255,255,.5);flex:0 0 auto}.ids{font-size:11px;color:var(--muted);margin-top:7px;max-height:44px;overflow:auto;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.actions button{font-size:11px;padding:5px 7px}.parentActions{display:flex;gap:6px;flex-wrap:wrap}.parentActions button{font-size:11px;padding:5px 7px}.indentLabel{font-size:12px;color:var(--muted)}
-.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}.stat{background:#11151d;border:1px solid var(--line);border-radius:8px;padding:8px}.stat b{display:block;font-size:18px}.toolbar{position:absolute;left:14px;top:14px;display:flex;gap:8px;flex-wrap:wrap}.toolbar button,.toolbar select{font-size:12px;padding:7px 9px;width:auto;background:rgba(20,24,32,.92)}.hint{position:absolute;left:14px;bottom:14px;right:14px;color:var(--muted);font-size:12px;background:rgba(12,15,20,.74);border:1px solid var(--line);border-radius:10px;padding:9px 11px;pointer-events:none}.info{position:absolute;right:14px;top:14px;background:rgba(12,15,20,.86);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12px;min-width:210px}.kbd{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#2a3040;border-radius:4px;padding:1px 5px;color:#dfe6f3}.report{white-space:pre-wrap;min-height:56px;max-height:160px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;line-height:1.4;color:#c9d3e1;background:#11151d;border:1px solid var(--line);border-radius:8px;padding:8px}
+:root{
+  --bg:oklch(20% .012 252);
+  --stage:oklch(17% .014 252);
+  --panel:oklch(25% .014 252 / .86);
+  --panel-soft:oklch(28% .014 252 / .62);
+  --control:oklch(29% .012 252 / .72);
+  --control-hover:oklch(36% .018 252 / .82);
+  --text:oklch(94% .012 252);
+  --muted:oklch(76% .018 252);
+  --faint:oklch(61% .018 252);
+  --line:oklch(42% .016 252 / .58);
+  --line-soft:oklch(42% .016 252 / .28);
+  --accent:oklch(72% .105 221);
+  --accent-soft:oklch(38% .075 221 / .72);
+  --ok:oklch(70% .12 154);
+  --danger:oklch(68% .13 25);
+  --shadow:0 18px 44px oklch(8% .014 252 / .24);
+  --font-ui:11px;
+  --font-small:10px;
+  --font-mono:10px;
+  --control-pad-y:5px;
+  --control-pad-x:7px;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  height:100vh;
+  overflow:hidden;
+}
+.app{
+  display:grid;
+  grid-template-columns:minmax(260px,300px) 1fr minmax(250px,300px);
+  height:100vh;
+  background:
+    radial-gradient(circle at 50% 50%,oklch(29% .02 252) 0,oklch(19% .014 252) 58%,oklch(16% .014 252) 100%);
+}
+aside{
+  background:var(--panel);
+  border-right:1px solid var(--line-soft);
+  overflow:auto;
+  padding:10px;
+  scrollbar-width:thin;
+  scrollbar-color:oklch(42% .018 252) transparent;
+  backdrop-filter:saturate(110%);
+}
+aside.right{border-left:1px solid var(--line-soft);border-right:0}
+main{position:relative;overflow:hidden;background:transparent}
+canvas{width:100%;height:100%;display:block;cursor:crosshair}
+.section{
+  border:1px solid var(--line-soft);
+  background:oklch(18% .012 252 / .38);
+  border-radius:8px;
+  padding:10px;
+  margin-bottom:8px;
+}
+.section h2{
+  color:var(--muted);
+  font-size:var(--font-small);
+  line-height:1;
+  font-weight:700;
+  margin:0 0 9px;
+  text-transform:uppercase;
+  letter-spacing:.055em;
+}
+.small{font-size:var(--font-small);color:var(--faint);line-height:1.38}
+.row{display:flex;gap:8px;align-items:center}
+.col{display:flex;flex-direction:column;gap:8px}
+input,textarea,select,button{
+  font:inherit;
+  font-size:var(--font-ui);
+  border-radius:7px;
+  border:1px solid var(--line-soft);
+  background:var(--control);
+  color:var(--text);
+  padding:var(--control-pad-y) var(--control-pad-x);
+  outline:0;
+}
+input,textarea,select{width:100%}
+input::placeholder{color:oklch(52% .014 252)}
+textarea{
+  min-height:180px;
+  max-height:32vh;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-size:var(--font-mono);
+  line-height:1.45;
+  resize:vertical;
+}
+button{
+  cursor:pointer;
+  background:var(--control);
+  color:oklch(88% .014 252);
+  transition:background-color .16s ease-out,color .16s ease-out,border-color .16s ease-out,opacity .16s ease-out;
+}
+button:hover{background:var(--control-hover);color:var(--text)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px oklch(72% .105 221 / .16);
+}
+button.primary{
+  background:oklch(34% .06 221 / .78);
+  border-color:oklch(54% .095 221 / .54);
+  color:oklch(89% .035 221);
+}
+button.ok{
+  background:oklch(31% .055 154 / .68);
+  border-color:oklch(55% .11 154 / .42);
+  color:oklch(88% .04 154);
+}
+button.danger{
+  background:oklch(29% .052 25 / .62);
+  border-color:oklch(55% .12 25 / .42);
+  color:oklch(86% .045 25);
+}
+button.activeBtn{
+  border-color:var(--accent);
+  color:oklch(90% .035 221);
+  background:var(--accent-soft);
+}
+.parent{
+  border:1px solid transparent;
+  border-radius:8px;
+  margin-bottom:6px;
+  background:oklch(16% .012 252 / .42);
+  overflow:hidden;
+}
+.parent:hover{border-color:var(--line-soft)}
+.parentHead{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:8px;
+  background:oklch(22% .012 252 / .48);
+  border-bottom:1px solid var(--line-soft);
+}
+.parent.collapsed .parentHead{border-bottom:0}
+.parentName{
+  font-weight:650;
+  font-size:var(--font-ui);
+  flex:1;
+  word-break:break-word;
+}
+.toggleParent{
+  width:22px;
+  height:22px;
+  padding:0;
+  display:grid;
+  place-items:center;
+  font-weight:650;
+  flex:0 0 auto;
+}
+.childWrap{padding:7px 7px 8px 12px}
+.child{
+  border:1px solid transparent;
+  border-radius:7px;
+  padding:8px;
+  margin-top:6px;
+  background:oklch(14.5% .012 252 / .56);
+}
+.child:hover{border-color:var(--line-soft)}
+.child.active{
+  border-color:oklch(68% .1 221 / .72);
+  background:oklch(24% .035 221 / .42);
+}
+.childTitle{display:flex;gap:7px;align-items:center}
+.childName{font-weight:620;font-size:var(--font-ui);word-break:break-word;flex:1}
+.badge{
+  font-size:var(--font-small);
+  color:var(--muted);
+  background:oklch(27% .014 252 / .52);
+  padding:1px 6px;
+  border-radius:999px;
+}
+.dot{
+  width:10px;
+  height:10px;
+  border-radius:99px;
+  border:1px solid oklch(90% .01 252 / .42);
+  flex:0 0 auto;
+}
+.ids{
+  font-size:var(--font-mono);
+  color:var(--faint);
+  margin-top:6px;
+  max-height:34px;
+  overflow:auto;
+  word-break:break-word;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+.actions,.parentActions{
+  display:flex;
+  gap:5px;
+  margin-top:7px;
+  flex-wrap:wrap;
+  opacity:.42;
+  transition:opacity .16s ease-out;
+}
+.child:hover .actions,.parent:hover .parentActions,.child.active .actions{opacity:1}
+.actions button,.parentActions button{font-size:var(--font-small);padding:3px 5px}
+.indentLabel{font-size:var(--font-small);color:var(--faint)}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.stat{
+  background:oklch(16% .012 252 / .42);
+  border:1px solid var(--line-soft);
+  border-radius:7px;
+  padding:8px;
+}
+.stat b{display:block;font-size:17px;font-weight:680;line-height:1.15;color:var(--text)}
+.toolbar{
+  position:absolute;
+  left:12px;
+  top:12px;
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+  max-width:min(740px,calc(100% - 250px));
+}
+.toolbar button,.toolbar select{
+  width:auto;
+  font-size:var(--font-ui);
+  padding:4px 7px;
+  background:oklch(15% .012 252 / .68);
+  border-color:oklch(42% .016 252 / .3);
+  box-shadow:0 8px 22px oklch(7% .014 252 / .24);
+}
+.info{
+  position:absolute;
+  right:12px;
+  top:12px;
+  min-width:182px;
+  background:oklch(15% .012 252 / .72);
+  border:1px solid var(--line-soft);
+  border-radius:8px;
+  box-shadow:var(--shadow);
+  padding:8px 9px;
+  color:var(--muted);
+  font-size:var(--font-ui);
+  line-height:1.5;
+}
+.info b{color:var(--text);font-weight:680}
+.hint{
+  position:absolute;
+  left:12px;
+  bottom:12px;
+  right:12px;
+  color:var(--faint);
+  font-size:var(--font-ui);
+  line-height:1.35;
+  background:oklch(13% .012 252 / .5);
+  border:1px solid var(--line-soft);
+  border-radius:8px;
+  padding:7px 9px;
+  pointer-events:none;
+}
+.kbd{
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  background:oklch(27% .014 252 / .58);
+  border-radius:4px;
+  padding:1px 4px;
+  color:oklch(82% .012 252);
+}
+.report{
+  white-space:pre-wrap;
+  min-height:50px;
+  max-height:128px;
+  overflow:auto;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-size:var(--font-mono);
+  line-height:1.4;
+  color:var(--muted);
+  background:oklch(14.5% .012 252 / .54);
+  border:1px solid var(--line-soft);
+  border-radius:7px;
+  padding:8px;
+}
+.toastStack{
+  position:fixed;
+  right:12px;
+  bottom:12px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  width:min(280px,calc(100vw - 24px));
+  z-index:20;
+  pointer-events:none;
+}
+.toast{
+  border:1px solid var(--line-soft);
+  border-radius:8px;
+  background:oklch(22% .014 252 / .94);
+  box-shadow:var(--shadow);
+  color:var(--text);
+  font-size:var(--font-ui);
+  line-height:1.35;
+  padding:8px 9px;
+  opacity:0;
+  transform:translateY(6px);
+  transition:opacity .18s ease-out,transform .18s ease-out;
+}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.error{
+  border-color:oklch(62% .12 25 / .5);
+  background:oklch(29% .052 25 / .92);
+}
+.toast.ok{
+  border-color:oklch(58% .11 154 / .46);
+  background:oklch(27% .055 154 / .9);
+}
+.dialogBackdrop{
+  position:fixed;
+  inset:0;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:16px;
+  background:oklch(8% .012 252 / .32);
+  z-index:30;
+}
+.dialogBackdrop.open{display:flex}
+.dialog{
+  width:min(320px,100%);
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:oklch(24% .014 252);
+  box-shadow:var(--shadow);
+  padding:12px;
+}
+.dialogTitle{
+  margin:0 0 7px;
+  color:var(--text);
+  font-size:var(--font-ui);
+  font-weight:680;
+}
+.dialogMessage{
+  margin:0 0 10px;
+  color:var(--muted);
+  font-size:var(--font-ui);
+  line-height:1.4;
+}
+.dialogActions{
+  display:flex;
+  justify-content:flex-end;
+  gap:6px;
+  margin-top:10px;
+}
+@media (max-width:1100px){
+  .app{grid-template-columns:260px 1fr}
+  aside.right{position:absolute;right:0;top:0;bottom:0;width:280px;z-index:4;box-shadow:var(--shadow)}
+  .toolbar{max-width:calc(100% - 210px)}
+}
+@media (max-width:760px){
+  body{overflow:auto}
+  .app{height:auto;min-height:100vh;grid-template-columns:1fr}
+  main{height:62vh;order:-1}
+  aside,aside.right{position:relative;top:auto;bottom:auto;right:auto;width:auto;border:0;border-top:1px solid var(--line-soft)}
+  .toolbar{max-width:calc(100% - 24px)}
+  .info{top:auto;bottom:56px}
+  .hint{display:none}
+}
 </style>
 </head>
 <body>
-<header><h1>MediaPipe FaceMesh Landmark Grouper</h1><div class="meta">Parent -> child hierarchy. Landmarks are assigned only to child groups.</div></header>
 <div class="app">
 <aside>
-  <div class="section"><h2>Profile</h2><div class="col"><select id="profileSelect"><option value="full">Full</option><option value="dense">Dense</option><option value="sparse">Sparse</option></select><div class="small">Each profile has its own parent and child groups. Export stores all profiles together.</div></div></div>
-  <div class="section"><h2>Parent group</h2><div class="col"><input id="parentName" placeholder="e.g. nose"><button class="primary" id="addParent">Create parent</button><div class="small">A parent is only a container, such as <span class="kbd">nose</span>. Assign landmarks to child groups.</div></div></div>
-  <div class="section"><h2>Child group</h2><div class="col"><select id="parentSelect"></select><input id="childName" placeholder="e.g. left_nostril"><div class="row"><input id="childColor" type="color" value="#7cc7ff" style="width:56px;padding:4px;height:38px"><button class="primary" id="addChild">Create child</button></div><div class="small">Clicked landmarks go to the active child group. The same landmark can be shared by multiple child groups.</div></div></div>
+  <div class="section"><h2>Profile</h2><div class="col"><select id="profileSelect"><option value="full">Full</option><option value="dense">Dense</option><option value="sparse">Sparse</option></select><div class="small">Profiles keep separate group sets. Export includes all three.</div></div></div>
+  <div class="section"><h2>Parent</h2><div class="col"><input id="parentName" placeholder="e.g. nose"><button class="primary" id="addParent">Create parent</button><div class="small">Parents organize child groups. Points are assigned only to children.</div></div></div>
+  <div class="section"><h2>Child</h2><div class="col"><select id="parentSelect"></select><input id="childName" placeholder="e.g. left_nostril"><div class="row"><input id="childColor" type="color" value="#7cc7ff" style="width:56px;padding:4px;height:34px"><button class="primary" id="addChild">Create child</button></div><div class="small">Click landmarks to add them to the active child. Shared IDs are allowed.</div></div></div>
   <div class="section"><h2>Groups</h2><div id="groups"></div></div>
 </aside>
 <main>
   <canvas id="canvas"></canvas>
   <div class="toolbar"><select id="viewMode"><option value="front">Front X/Y</option><option value="side">Side Z/Y</option><option value="top">Top X/Z</option><option value="free3d">Free 3D</option></select><button id="resetView">Reset</button><button id="toggleMesh">Mesh: ON</button><button id="toggleLabels">ID: OFF</button><button id="showAll">Show all</button><button id="showUnassigned">Show unassigned</button><button id="unassignSelected">Unassign selected</button></div>
   <div class="info" id="info">Hover a point</div>
-  <div class="hint">Scroll = zoom. Drag background = pan; in <span class="kbd">Free 3D</span>, drag = rotate and <span class="kbd">Shift</span> + drag = pan. Click = assign to active child group. <span class="kbd">Alt</span> + click = remove from active child group.</div>
+  <div class="hint">Scroll zooms. Drag pans. In <span class="kbd">Free 3D</span>, drag rotates and <span class="kbd">Shift</span> + drag pans. Click assigns. <span class="kbd">Alt</span> + click removes.</div>
 </main>
 <aside class="right">
   <div class="section stats"><div class="stat"><span class="small">Used IDs</span><b id="assignedCount">0</b></div><div class="stat"><span class="small">Free IDs</span><b id="freeCount">478</b></div></div>
-  <div class="section"><h2>Manual IDs</h2><div class="col"><input id="manualIds" placeholder="e.g. 1, 2, 4 or 10-20"><button class="ok" id="addManual">Add to active child group</button><div class="small">Ranges 0-477 are supported, including iris IDs 468-477. IDs already in this child group are skipped.</div></div></div>
+  <div class="section"><h2>Manual IDs</h2><div class="col"><input id="manualIds" placeholder="e.g. 1, 2, 4 or 10-20"><button class="ok" id="addManual">Add to active child</button><div class="small">Supports 0-477, including iris IDs 468-477. Existing IDs are skipped.</div></div></div>
   <div class="section"><h2>Import / Export</h2><div class="col"><button class="primary" id="exportBtn">Generate JSON</button><button id="validateBtn">Validate JSON</button><div class="report" id="validationBox">Not validated yet.</div><button id="downloadBtn">Download profiles.json</button><textarea id="jsonBox" spellcheck="false"></textarea><button id="importBtn">Import JSON</button><button class="danger" id="clearAll">Clear current profile</button></div></div>
-  <div class="section"><h2>Export format</h2><div class="small">Export stores <span class="kbd">profiles.full</span>, <span class="kbd">profiles.dense</span>, and <span class="kbd">profiles.sparse</span>. Each profile uses the parent -> child structure, for example <span class="kbd">{"nose":{"left_nostril":[...]}}</span>.</div></div>
+  <div class="section"><h2>Format</h2><div class="small">Export stores <span class="kbd">profiles.full</span>, <span class="kbd">profiles.dense</span>, and <span class="kbd">profiles.sparse</span> with parent to child nesting.</div></div>
 </aside>
+</div>
+<div class="toastStack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
+<div class="dialogBackdrop" id="dialogBackdrop">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+    <h2 class="dialogTitle" id="dialogTitle"></h2>
+    <p class="dialogMessage" id="dialogMessage"></p>
+    <input id="dialogInput" autocomplete="off">
+    <div class="dialogActions">
+      <button id="dialogCancel">Cancel</button>
+      <button class="primary" id="dialogOk">OK</button>
+    </div>
+  </div>
 </div>
 <script>
 'use strict';
@@ -82,6 +446,39 @@ const canvas=document.getElementById('canvas'), ctx=canvas.getContext('2d');
 function el(id){return document.getElementById(id)}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function uid(p='id'){return p+'_'+Date.now()+'_'+Math.random().toString(36).slice(2)}
+function appToast(message,type='info'){
+  const stack=el('toastStack');
+  const item=document.createElement('div');
+  item.className='toast'+(type==='error'?' error':type==='ok'?' ok':'');
+  item.textContent=message;
+  stack.appendChild(item);
+  requestAnimationFrame(()=>item.classList.add('show'));
+  setTimeout(()=>{item.classList.remove('show'); setTimeout(()=>item.remove(),200);},2600);
+}
+function appDialog({title,message='',value='',input=false,okText='OK',danger=false}){
+  return new Promise(resolve=>{
+    const backdrop=el('dialogBackdrop'), inputEl=el('dialogInput'), ok=el('dialogOk'), cancel=el('dialogCancel');
+    el('dialogTitle').textContent=title;
+    el('dialogMessage').textContent=message;
+    inputEl.value=value;
+    inputEl.style.display=input?'block':'none';
+    ok.textContent=okText;
+    ok.className=danger?'danger':'primary';
+    backdrop.classList.add('open');
+    const finish=result=>{
+      backdrop.classList.remove('open');
+      ok.onclick=null; cancel.onclick=null; backdrop.onclick=null; inputEl.onkeydown=null;
+      resolve(result);
+    };
+    ok.onclick=()=>finish(input?inputEl.value:true);
+    cancel.onclick=()=>finish(input?null:false);
+    backdrop.onclick=e=>{if(e.target===backdrop)finish(input?null:false);};
+    inputEl.onkeydown=e=>{if(e.key==='Enter')finish(inputEl.value); if(e.key==='Escape')finish(null);};
+    if(input)inputEl.focus(); else ok.focus();
+  });
+}
+function appConfirm(message,title='Confirm',okText='OK',danger=false){return appDialog({title,message,okText,danger});}
+function appPrompt(title,value=''){return appDialog({title,value,input:true,okText:'Save'});}
 function saveProfileState(){profiles[currentProfile].parents=parents; profiles[currentProfile].assigned=assigned; profiles[currentProfile].activeChild=activeChild}
 function useProfile(name){saveProfileState(); currentProfile=PROFILE_NAMES.includes(name)?name:'full'; const state=profiles[currentProfile]; parents=state.parents; assigned=state.assigned; activeChild=state.activeChild; filter={mode:'all',parentId:null,childId:null}; selected=null; hovered=null; renderGroups();stats();draw();exportJson();}
 function resetCurrentProfile(){parents=[]; assigned=new Map(); activeChild=null; profiles[currentProfile]= {parents,assigned,activeChild}; selected=null; filter={mode:'all',parentId:null,childId:null};}
@@ -110,7 +507,7 @@ function nearest(pos){let best=null,bd=1e9; for(let i=0;i<MAX_LANDMARKS;i++){con
 function pointVisibility(id){const cids=childIdsForPoint(id), hasAny=cids.size>0; if(filter.mode==='all')return {visible:true, alpha:hasAny?0.96:0.82}; if(filter.mode==='unassigned')return {visible:!hasAny, alpha:hasAny?0.03:1}; if(filter.mode==='showChild')return {visible:true, alpha:cids.has(filter.childId)?1:0.08}; if(filter.mode==='soloChild')return {visible:cids.has(filter.childId), alpha:1}; if(filter.mode==='showParent'){const s=childIdsOfParent(filter.parentId), inParent=[...cids].some(cid=>s.has(cid)); return {visible:true, alpha:inParent?1:0.08};} if(filter.mode==='soloParent'){const s=childIdsOfParent(filter.parentId), inParent=[...cids].some(cid=>s.has(cid)); return {visible:inParent, alpha:1};} return {visible:true,alpha:1};}
 function faceVisibility(face){if(filter.mode==='all')return .16; let alphas=face.map(id=>pointVisibility(id)).filter(v=>v.visible).map(v=>v.alpha); if(!alphas.length)return 0; return Math.max(.02, Math.min(.18, Math.max(...alphas)*.16));}
 function draw(){ctx.clearRect(0,0,canvas.width,canvas.height); if(!canvas.width)return; if(showMesh){ctx.lineWidth=Math.max(1,devicePixelRatio); for(const f of FACES){const a=faceVisibility(f); if(a<=0)continue; ctx.strokeStyle=`rgba(145,160,185,${a})`; ctx.beginPath(); f.forEach((id,k)=>{const [x,y]=toScreen(id); k?ctx.lineTo(x,y):ctx.moveTo(x,y)}); ctx.closePath(); ctx.stroke();}}
-  for(let i=0;i<MAX_LANDMARKS;i++){const vis=pointVisibility(i); if(!vis.visible)continue; const cid=primaryChildIdForPoint(i), [x,y]=toScreen(i), found=cid?findChild(cid):null; ctx.globalAlpha=vis.alpha; ctx.beginPath(); ctx.fillStyle=cid?(found?.child.color||'#888'):(IRIS_IDS.has(i)?'#f6d58a':'#eef4ff'); ctx.arc(x,y,(cid?4.8:(IRIS_IDS.has(i)?4.2:3.3))*devicePixelRatio,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; if(i===hovered||i===selected){ctx.strokeStyle=i===selected?'#fff':'#ffd079';ctx.lineWidth=2*devicePixelRatio;ctx.beginPath();ctx.arc(x,y,9*devicePixelRatio,0,Math.PI*2);ctx.stroke();} if(showLabels||i===hovered||i===selected){ctx.fillStyle='#fff';ctx.font=`${10*devicePixelRatio}px ui-monospace,monospace`;ctx.fillText(String(i),x+6*devicePixelRatio,y-6*devicePixelRatio);}}
+  for(let i=0;i<MAX_LANDMARKS;i++){const vis=pointVisibility(i); if(!vis.visible)continue; const cid=primaryChildIdForPoint(i), [x,y]=toScreen(i), found=cid?findChild(cid):null; ctx.globalAlpha=vis.alpha; ctx.beginPath(); ctx.fillStyle=cid?(found?.child.color||'#a7afbd'):(IRIS_IDS.has(i)?'#f2d184':'#e8edf5'); ctx.arc(x,y,(cid?4.8:(IRIS_IDS.has(i)?4.2:3.3))*devicePixelRatio,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; if(i===hovered||i===selected){ctx.strokeStyle=i===selected?'#e8edf5':'#ffd079';ctx.lineWidth=2*devicePixelRatio;ctx.beginPath();ctx.arc(x,y,9*devicePixelRatio,0,Math.PI*2);ctx.stroke();} if(showLabels||i===hovered||i===selected){ctx.fillStyle='#e8edf5';ctx.font=`${10*devicePixelRatio}px ui-monospace,monospace`;ctx.fillText(String(i),x+6*devicePixelRatio,y-6*devicePixelRatio);}}
 }
 function stats(){el('assignedCount').textContent=assigned.size; el('freeCount').textContent=MAX_LANDMARKS-assigned.size;}
 function renderParentSelect(){const s=el('parentSelect'); const val=s.value; s.innerHTML=''; for(const p of parents){const o=document.createElement('option'); o.value=p.id; o.textContent=p.name; s.appendChild(o);} if(parents.some(p=>p.id===val))s.value=val;}
@@ -122,23 +519,23 @@ function renderGroups(){renderParentSelect(); const box=el('groups'); box.innerH
     div.querySelector('[data-pa="add"]').onclick=()=>{el('parentSelect').value=p.id; el('childName').focus();};
     div.querySelector('[data-pa="show"]').onclick=()=>setFilter('showParent',p.id,null);
     div.querySelector('[data-pa="solo"]').onclick=()=>setFilter('soloParent',p.id,null);
-    div.querySelector('[data-pa="rename"]').onclick=()=>{const n=prompt('New parent name:',p.name); if(n&&n.trim()){p.name=n.trim();renderGroups();exportJson();}};
-    div.querySelector('[data-pa="delete"]').onclick=()=>{if(confirm('Delete this parent and all child groups? Shared points remain in other groups.')){for(const c of p.children){for(const id of c.ids)removePointFromChild(id,c.id); if(activeChild===c.id)activeChild=null;} parents=parents.filter(x=>x.id!==p.id); if(!activeChild)activeChild=allChildren()[0]?.id||null; renderGroups();stats();draw();exportJson();}};
+    div.querySelector('[data-pa="rename"]').onclick=async()=>{const n=await appPrompt('Rename parent',p.name); if(n&&n.trim()){p.name=n.trim();renderGroups();exportJson();appToast('Parent renamed.','ok');}};
+    div.querySelector('[data-pa="delete"]').onclick=async()=>{if(await appConfirm('Delete this parent and all child groups? Shared points remain in other groups.','Delete parent','Delete',true)){for(const c of p.children){for(const id of c.ids)removePointFromChild(id,c.id); if(activeChild===c.id)activeChild=null;} parents=parents.filter(x=>x.id!==p.id); if(!activeChild)activeChild=allChildren()[0]?.id||null; renderGroups();stats();draw();exportJson();appToast('Parent deleted.','ok');}};
     const cb=div.querySelector('[data-children]');
     if(!p.children.length){cb.innerHTML='<div class="small" style="margin-top:8px">No child groups.</div>';} else for(const c of p.children){const cd=document.createElement('div'); cd.className='child'+(c.id===activeChild?' active':''); cd.innerHTML=`<div class="childTitle"><span class="dot" style="background:${c.color}"></span><div class="childName">${esc(c.name)}</div><span class="badge">${c.ids.length}</span></div><div class="ids">${c.ids.join(', ')||'none'}</div><div class="actions"><button data-a="active">Set active</button><button data-a="show" class="${filter.mode==='showChild'&&filter.childId===c.id?'activeBtn':''}">Show</button><button data-a="solo" class="${filter.mode==='soloChild'&&filter.childId===c.id?'activeBtn':''}">Solo</button><button data-a="rename">Rename</button><button data-a="clear">Clear</button><button data-a="delete">Delete</button></div>`;
       cd.querySelector('[data-a="active"]').onclick=()=>{activeChild=c.id;renderGroups();draw();};
       cd.querySelector('[data-a="show"]').onclick=()=>setFilter('showChild',null,c.id);
       cd.querySelector('[data-a="solo"]').onclick=()=>setFilter('soloChild',null,c.id);
-      cd.querySelector('[data-a="rename"]').onclick=()=>{const n=prompt('New child name:',c.name); if(n&&n.trim()){c.name=n.trim();renderGroups();exportJson();}};
+      cd.querySelector('[data-a="rename"]').onclick=async()=>{const n=await appPrompt('Rename child',c.name); if(n&&n.trim()){c.name=n.trim();renderGroups();exportJson();appToast('Child renamed.','ok');}};
       cd.querySelector('[data-a="clear"]').onclick=()=>{for(const id of c.ids)removePointFromChild(id,c.id); c.ids=[]; renderGroups();stats();draw();exportJson();};
-      cd.querySelector('[data-a="delete"]').onclick=()=>{if(confirm('Delete this child group? Shared points remain in other groups.')){for(const id of c.ids)removePointFromChild(id,c.id); p.children=p.children.filter(x=>x.id!==c.id); if(activeChild===c.id)activeChild=allChildren()[0]?.id||null; renderGroups();stats();draw();exportJson();}};
+      cd.querySelector('[data-a="delete"]').onclick=async()=>{if(await appConfirm('Delete this child group? Shared points remain in other groups.','Delete child','Delete',true)){for(const id of c.ids)removePointFromChild(id,c.id); p.children=p.children.filter(x=>x.id!==c.id); if(activeChild===c.id)activeChild=allChildren()[0]?.id||null; renderGroups();stats();draw();exportJson();appToast('Child deleted.','ok');}};
       cb.appendChild(cd);
     }
     box.appendChild(div);
   }
 }
-function addParent(name){name=(name||el('parentName').value).trim(); if(!name){alert('Enter a parent group name.');return null} if(parents.some(p=>p.name===name)){alert('That parent already exists.');return parents.find(p=>p.name===name)} const p={id:uid('p'),name,children:[],collapsed:false}; parents.push(p); el('parentName').value=''; renderGroups(); exportJson(); return p;}
-function addChild(parentId,name,color){parentId=parentId||el('parentSelect').value; const p=parents.find(x=>x.id===parentId); if(!p){alert('Create a parent first.');return null} name=(name||el('childName').value).trim(); if(!name){alert('Enter a child group name.');return null} if(p.children.some(c=>c.name===name)){alert('That child already exists in this parent.');return p.children.find(c=>c.name===name)} const c={id:uid('c'),name,color:color||el('childColor').value||COLORS[allChildren().length%COLORS.length],ids:[]}; p.collapsed=false; p.children.push(c); activeChild=c.id; el('childName').value=''; el('childColor').value=COLORS[(allChildren().length+1)%COLORS.length]; renderGroups();stats();draw();exportJson(); return c;}
+function addParent(name){name=(name||el('parentName').value).trim(); if(!name){appToast('Enter a parent group name.','error');return null} if(parents.some(p=>p.name===name)){appToast('That parent already exists.','error');return parents.find(p=>p.name===name)} const p={id:uid('p'),name,children:[],collapsed:false}; parents.push(p); el('parentName').value=''; renderGroups(); exportJson(); appToast('Parent created.','ok'); return p;}
+function addChild(parentId,name,color){parentId=parentId||el('parentSelect').value; const p=parents.find(x=>x.id===parentId); if(!p){appToast('Create a parent first.','error');return null} name=(name||el('childName').value).trim(); if(!name){appToast('Enter a child group name.','error');return null} if(p.children.some(c=>c.name===name)){appToast('That child already exists in this parent.','error');return p.children.find(c=>c.name===name)} const c={id:uid('c'),name,color:color||el('childColor').value||COLORS[allChildren().length%COLORS.length],ids:[]}; p.collapsed=false; p.children.push(c); activeChild=c.id; el('childName').value=''; el('childColor').value=COLORS[(allChildren().length+1)%COLORS.length]; renderGroups();stats();draw();exportJson(); appToast('Child created.','ok'); return c;}
 function getOrCreateParent(name){let p=parents.find(x=>x.name===name); if(!p){p={id:uid('p'),name,children:[],collapsed:false}; parents.push(p);} return p;}
 function getOrCreateChild(parentName,childName,color){const p=getOrCreateParent(parentName); let c=p.children.find(x=>x.name===childName); if(!c){c={id:uid('c'),name:childName,color:color||COLORS[allChildren().length%COLORS.length],ids:[]}; p.children.push(c);} return c;}
 function assign(id,cid=activeChild){if(!cid||id<0||id>=MAX_LANDMARKS)return false; const found=findChild(cid); if(!found||found.child.ids.includes(id))return false; if(!assigned.has(id))assigned.set(id,new Set()); assigned.get(id).add(cid); found.child.ids.push(id); found.child.ids=[...new Set(found.child.ids)].sort((a,b)=>a-b); renderGroups();stats();draw();exportJson();return true;}
@@ -164,19 +561,19 @@ function validateMappingObject(data){const mappings=isProfileExport(data)?data.p
 }
 function validateJsonBox(){let data; try{data=JSON.parse(el('jsonBox').value)}catch(e){el('validationBox').textContent='Invalid JSON: '+e.message; return null;} return validateMappingObject(data);}
 function replaceProfileFromMapping(name,mapping){const previous={currentProfile,parents,assigned,activeChild}; profiles[name]=emptyProfile(); currentProfile=name; parents=profiles[name].parents; assigned=profiles[name].assigned; activeChild=null; let i=0; for(const [pname,cname,ids] of flattenForImport(mapping||{})){const c=getOrCreateChild(pname,cname,COLORS[i++%COLORS.length]); addIdsToChild(c,ids);} saveProfileState(); currentProfile=previous.currentProfile; if(previous.currentProfile===name){parents=profiles[name].parents; assigned=profiles[name].assigned; activeChild=profiles[name].activeChild;} else {parents=previous.parents; assigned=previous.assigned; activeChild=previous.activeChild;}}
-function importJson(){let data; try{data=JSON.parse(el('jsonBox').value)}catch(e){alert('Invalid JSON');return} const report=validateMappingObject(data); if(report.invalidCount&&!confirm('JSON contains invalid IDs. Import will skip out-of-range points. Continue?'))return; const keepProfile=currentProfile; if(isProfileExport(data)){for(const name of PROFILE_NAMES)replaceProfileFromMapping(name,data.profiles[name]||{}); currentProfile=PROFILE_NAMES.includes(keepProfile)?keepProfile:'full';} else {replaceProfileFromMapping(currentProfile,data);} parents=profiles[currentProfile].parents; assigned=profiles[currentProfile].assigned; activeChild=profiles[currentProfile].activeChild; el('profileSelect').value=currentProfile; renderGroups();stats();draw();exportJson();}
-canvas.addEventListener('mousemove',e=>{const pos=fromEvent(e); if(dragMode){const dx=e.clientX-last.x,dy=e.clientY-last.y; if(Math.hypot(dx,dy)>1)moved=true; if(dragMode==='rotate'){freeRot.yaw+=dx*.005; freeRot.pitch=Math.max(-Math.PI*.49,Math.min(Math.PI*.49,freeRot.pitch+dy*.005));} else {pan.x+=dx; pan.y+=dy;} last={x:e.clientX,y:e.clientY};} hovered=nearest(pos); if(hovered==null)el('info').textContent='Hover a point'; else {const memberships=[...childIdsForPoint(hovered)].map(cid=>findChild(cid)).filter(Boolean), v=landmarkPoint(hovered), virtual=IRIS_IDS.has(hovered)?'<br>virtual iris point':'', memberHtml=memberships.length?memberships.map(x=>`<br>${esc(x.parent.name)}: <span style="color:${x.child.color||'#fff'}">${esc(x.child.name)}</span>`).join(''):'free'; el('info').innerHTML=`<b>ID ${hovered}</b>${virtual}<br>x ${v[0].toFixed(3)}<br>y ${v[1].toFixed(3)}<br>z ${v[2].toFixed(3)}<br>${memberHtml}`;} draw();});
+async function importJson(){let data; try{data=JSON.parse(el('jsonBox').value)}catch(e){appToast('Invalid JSON.','error');return} const report=validateMappingObject(data); if(report.invalidCount&&!(await appConfirm('JSON contains invalid IDs. Import will skip out-of-range points. Continue?','Import JSON','Import',true)))return; const keepProfile=currentProfile; if(isProfileExport(data)){for(const name of PROFILE_NAMES)replaceProfileFromMapping(name,data.profiles[name]||{}); currentProfile=PROFILE_NAMES.includes(keepProfile)?keepProfile:'full';} else {replaceProfileFromMapping(currentProfile,data);} parents=profiles[currentProfile].parents; assigned=profiles[currentProfile].assigned; activeChild=profiles[currentProfile].activeChild; el('profileSelect').value=currentProfile; renderGroups();stats();draw();exportJson(); appToast('JSON imported.','ok');}
+canvas.addEventListener('mousemove',e=>{const pos=fromEvent(e); if(dragMode){const dx=e.clientX-last.x,dy=e.clientY-last.y; if(Math.hypot(dx,dy)>1)moved=true; if(dragMode==='rotate'){freeRot.yaw+=dx*.005; freeRot.pitch=Math.max(-Math.PI*.49,Math.min(Math.PI*.49,freeRot.pitch+dy*.005));} else {pan.x+=dx; pan.y+=dy;} last={x:e.clientX,y:e.clientY};} hovered=nearest(pos); if(hovered==null)el('info').textContent='Hover a point'; else {const memberships=[...childIdsForPoint(hovered)].map(cid=>findChild(cid)).filter(Boolean), v=landmarkPoint(hovered), virtual=IRIS_IDS.has(hovered)?'<br>virtual iris point':'', memberHtml=memberships.length?memberships.map(x=>`<br>${esc(x.parent.name)}: <span style="color:${x.child.color||'#e8edf5'}">${esc(x.child.name)}</span>`).join(''):'free'; el('info').innerHTML=`<b>ID ${hovered}</b>${virtual}<br>x ${v[0].toFixed(3)}<br>y ${v[1].toFixed(3)}<br>z ${v[2].toFixed(3)}<br>${memberHtml}`;} draw();});
 canvas.addEventListener('mousedown',e=>{moved=false;last={x:e.clientX,y:e.clientY}; dragMode=(viewMode==='free3d'&&e.button===0&&!e.shiftKey)?'rotate':'pan';});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 window.addEventListener('mouseup',()=>{dragMode=null;});
-canvas.addEventListener('click',e=>{if(moved)return; const id=nearest(fromEvent(e)); if(id==null)return; selected=id; if(e.altKey){unassign(id);return} if(!activeChild){alert('Create or select a child group first.');return} if(!assign(id))draw();});
+canvas.addEventListener('click',e=>{if(moved)return; const id=nearest(fromEvent(e)); if(id==null)return; selected=id; if(e.altKey){unassign(id);return} if(!activeChild){appToast('Create or select a child group first.','error');return} if(!assign(id))draw();});
 canvas.addEventListener('wheel',e=>{e.preventDefault(); scale=Math.max(.2,Math.min(12,scale*(e.deltaY<0?1.1:.9))); draw();},{passive:false});
 el('addParent').onclick=()=>addParent(); el('parentName').addEventListener('keydown',e=>{if(e.key==='Enter')addParent();});
 el('addChild').onclick=()=>addChild(); el('childName').addEventListener('keydown',e=>{if(e.key==='Enter')addChild();});
-el('addManual').onclick=()=>{if(!activeChild){alert('Select a child group first.');return} for(const id of parseIds(el('manualIds').value))assign(id); el('manualIds').value='';};
+el('addManual').onclick=()=>{if(!activeChild){appToast('Select a child group first.','error');return} for(const id of parseIds(el('manualIds').value))assign(id); el('manualIds').value='';};
 el('profileSelect').onchange=e=>useProfile(e.target.value);
 el('exportBtn').onclick=exportJson; el('validateBtn').onclick=validateJsonBox; el('importBtn').onclick=importJson; el('downloadBtn').onclick=()=>{const blob=new Blob([JSON.stringify(exportJson(),null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='mediapipe_landmark_profiles.json'; a.click(); URL.revokeObjectURL(a.href);};
-el('clearAll').onclick=()=>{if(confirm('Clear current profile?')){resetCurrentProfile();renderGroups();stats();draw();exportJson();}};
+el('clearAll').onclick=async()=>{if(await appConfirm('Clear current profile?','Clear profile','Clear',true)){resetCurrentProfile();renderGroups();stats();draw();exportJson();appToast('Profile cleared.','ok');}};
 el('resetView').onclick=()=>{scale=1;pan={x:0,y:0};freeRot={yaw:0,pitch:0};draw();}; el('toggleMesh').onclick=e=>{showMesh=!showMesh;e.target.textContent='Mesh: '+(showMesh?'ON':'OFF');draw();}; el('toggleLabels').onclick=e=>{showLabels=!showLabels;e.target.textContent='ID: '+(showLabels?'ON':'OFF');draw();}; el('showAll').onclick=()=>setFilter('all'); el('showUnassigned').onclick=()=>setFilter('unassigned'); el('unassignSelected').onclick=()=>{if(selected!=null)unassign(selected);}; el('viewMode').onchange=e=>{viewMode=e.target.value;scale=1;pan={x:0,y:0};draw();};
 resize(); loadDefaultGroups();
 </script>
