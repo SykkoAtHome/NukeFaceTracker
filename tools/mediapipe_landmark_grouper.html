@@ -27,6 +27,8 @@
   --font-mono:10px;
   --control-pad-y:5px;
   --control-pad-x:7px;
+  --left-panel-width:300px;
+  --right-panel-width:300px;
 }
 *{box-sizing:border-box}
 body{
@@ -39,7 +41,7 @@ body{
 }
 .app{
   display:grid;
-  grid-template-columns:minmax(260px,300px) 1fr minmax(250px,300px);
+  grid-template-columns:minmax(220px,var(--left-panel-width)) minmax(0,1fr);
   height:100vh;
   background:
     radial-gradient(circle at 50% 50%,oklch(29% .02 252) 0,oklch(19% .014 252) 58%,oklch(16% .014 252) 100%);
@@ -49,11 +51,107 @@ aside{
   border-right:1px solid var(--line-soft);
   overflow:auto;
   padding:10px;
+  min-width:0;
   scrollbar-width:thin;
   scrollbar-color:oklch(42% .018 252) transparent;
   backdrop-filter:saturate(110%);
 }
-aside.right{border-left:1px solid var(--line-soft);border-right:0}
+.leftPanel{
+  position:relative;
+  container-type:inline-size;
+  overflow-x:hidden;
+}
+.leftResizeHandle{
+  position:absolute;
+  top:0;
+  right:-5px;
+  width:10px;
+  height:100%;
+  z-index:6;
+  cursor:col-resize;
+  touch-action:none;
+}
+.leftResizeHandle::after{
+  content:"";
+  position:absolute;
+  top:8px;
+  bottom:8px;
+  left:4px;
+  width:2px;
+  border-radius:99px;
+  background:transparent;
+  transition:background-color .16s ease-out;
+}
+.leftResizeHandle:hover::after,
+body.resizingLeft .leftResizeHandle::after{background:var(--accent)}
+body.resizingLeft{cursor:col-resize;user-select:none}
+.rightDrawer{
+  position:fixed;
+  right:0;
+  top:0;
+  bottom:0;
+  z-index:12;
+  width:min(var(--right-panel-width),calc(100vw - 24px));
+  border-left:1px solid var(--line-soft);
+  border-right:0;
+  box-shadow:var(--shadow);
+  transform:translateX(calc(100% + 14px));
+  transition:transform .22s cubic-bezier(.22,1,.36,1);
+}
+body.rightDrawerOpen .rightDrawer{transform:translateX(0)}
+.drawerEdgeToggle{
+  position:fixed;
+  right:0;
+  top:84px;
+  z-index:14;
+  width:28px;
+  height:74px;
+  padding:0;
+  display:grid;
+  place-items:center;
+  border-right:0;
+  border-radius:7px 0 0 7px;
+  background:oklch(22% .014 252 / .94);
+  box-shadow:0 10px 28px oklch(7% .014 252 / .24);
+  transition:right .22s cubic-bezier(.22,1,.36,1),background-color .16s ease-out,border-color .16s ease-out;
+}
+body.rightDrawerOpen .drawerEdgeToggle{right:min(var(--right-panel-width),calc(100vw - 24px))}
+.drawerEdgeToggle span{
+  display:block;
+  font-size:15px;
+  font-weight:760;
+  line-height:1;
+}
+.drawerHeader{
+  position:sticky;
+  top:-10px;
+  z-index:1;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin:-10px -10px 8px;
+  padding:10px;
+  background:oklch(25% .014 252 / .96);
+  border-bottom:1px solid var(--line-soft);
+}
+.drawerHeader h2{
+  margin:0;
+  color:var(--muted);
+  font-size:var(--font-small);
+  font-weight:700;
+  line-height:1;
+  text-transform:uppercase;
+  letter-spacing:.055em;
+}
+.iconButton{
+  width:24px;
+  height:24px;
+  padding:0;
+  display:grid;
+  place-items:center;
+  flex:0 0 auto;
+}
 main{position:relative;overflow:hidden;background:transparent}
 canvas{width:100%;height:100%;display:block;cursor:crosshair}
 .section{
@@ -147,6 +245,7 @@ button.activeBtn{
   font-weight:650;
   font-size:var(--font-ui);
   flex:1;
+  min-width:0;
   word-break:break-word;
 }
 .toggleParent{
@@ -172,7 +271,7 @@ button.activeBtn{
   background:oklch(24% .035 221 / .42);
 }
 .childTitle{display:flex;gap:7px;align-items:center}
-.childName{font-weight:620;font-size:var(--font-ui);word-break:break-word;flex:1}
+.childName{font-weight:620;font-size:var(--font-ui);word-break:break-word;flex:1;min-width:0}
 .badge{
   font-size:var(--font-small);
   color:var(--muted);
@@ -222,7 +321,7 @@ button.activeBtn{
   display:flex;
   gap:6px;
   flex-wrap:wrap;
-  max-width:min(740px,calc(100% - 250px));
+  max-width:calc(100% - 24px);
 }
 .toolbar button,.toolbar select{
   width:auto;
@@ -353,28 +452,38 @@ button.activeBtn{
   margin-top:10px;
 }
 @media (max-width:1100px){
-  .app{grid-template-columns:260px 1fr}
-  aside.right{position:absolute;right:0;top:0;bottom:0;width:280px;z-index:4;box-shadow:var(--shadow)}
-  .toolbar{max-width:calc(100% - 210px)}
+  .app{grid-template-columns:minmax(220px,var(--left-panel-width)) minmax(0,1fr)}
 }
 @media (max-width:760px){
   body{overflow:auto}
   .app{height:auto;min-height:100vh;grid-template-columns:1fr}
   main{height:62vh;order:-1}
-  aside,aside.right{position:relative;top:auto;bottom:auto;right:auto;width:auto;border:0;border-top:1px solid var(--line-soft)}
+  aside{border:0;border-top:1px solid var(--line-soft)}
+  .leftResizeHandle{display:none}
+  .rightDrawer{top:0;bottom:0;width:min(320px,calc(100vw - 18px));border-top:0}
+  body.rightDrawerOpen .drawerEdgeToggle{right:min(320px,calc(100vw - 18px))}
   .toolbar{max-width:calc(100% - 24px)}
   .info{top:auto;bottom:56px}
   .hint{display:none}
+}
+@container (max-width:260px){
+  .section{padding:8px}
+  .row{flex-wrap:wrap}
+  .row button{flex:1 1 140px}
+  .parentHead{flex-wrap:wrap;gap:5px}
+  .childWrap{padding-left:7px}
+  .actions button,.parentActions button{flex:1 1 64px}
 }
 </style>
 </head>
 <body>
 <div class="app">
-<aside>
+<aside class="leftPanel" id="leftPanel">
   <div class="section"><h2>Profile</h2><div class="col"><select id="profileSelect"><option value="full">Full</option><option value="dense">Dense</option><option value="sparse">Sparse</option></select><div class="small">Profiles keep separate group sets. Export includes all three.</div></div></div>
   <div class="section"><h2>Parent</h2><div class="col"><input id="parentName" placeholder="e.g. nose"><button class="primary" id="addParent">Create parent</button><div class="small">Parents organize child groups. Points are assigned only to children.</div></div></div>
   <div class="section"><h2>Child</h2><div class="col"><select id="parentSelect"></select><input id="childName" placeholder="e.g. left_nostril"><div class="row"><input id="childColor" type="color" value="#7cc7ff" style="width:56px;padding:4px;height:34px"><button class="primary" id="addChild">Create child</button></div><div class="small">Click landmarks to add them to the active child. Shared IDs are allowed.</div></div></div>
   <div class="section"><h2>Groups</h2><div id="groups"></div></div>
+  <div class="leftResizeHandle" id="leftResizeHandle" role="separator" aria-orientation="vertical" aria-label="Resize groups panel" aria-valuemin="220" aria-valuemax="560" aria-valuenow="300" tabindex="0"></div>
 </aside>
 <main>
   <canvas id="canvas"></canvas>
@@ -382,12 +491,14 @@ button.activeBtn{
   <div class="info" id="info">Hover a point</div>
   <div class="hint">Scroll zooms. Drag pans. In <span class="kbd">Free 3D</span>, drag rotates and <span class="kbd">Shift</span> + drag pans. Click assigns. <span class="kbd">Alt</span> + click removes.</div>
 </main>
-<aside class="right">
+<aside class="rightDrawer" id="rightPanel">
+  <div class="drawerHeader"><h2>Tools</h2><button class="iconButton" id="closeRightPanel" title="Hide tools" aria-label="Hide tools">x</button></div>
   <div class="section stats"><div class="stat"><span class="small">Used IDs</span><b id="assignedCount">0</b></div><div class="stat"><span class="small">Free IDs</span><b id="freeCount">478</b></div></div>
   <div class="section"><h2>Manual IDs</h2><div class="col"><input id="manualIds" placeholder="e.g. 1, 2, 4 or 10-20"><button class="ok" id="addManual">Add to active child</button><div class="small">Supports 0-477, including iris IDs 468-477. Existing IDs are skipped.</div></div></div>
   <div class="section"><h2>Import / Export</h2><div class="col"><button class="primary" id="exportBtn">Generate JSON</button><button id="validateBtn">Validate JSON</button><div class="report" id="validationBox">Not validated yet.</div><button id="downloadBtn">Download profiles.json</button><textarea id="jsonBox" spellcheck="false"></textarea><button id="importBtn">Import JSON</button><button class="danger" id="clearAll">Clear current profile</button></div></div>
   <div class="section"><h2>Format</h2><div class="small">Export stores <span class="kbd">profiles.full</span>, <span class="kbd">profiles.dense</span>, and <span class="kbd">profiles.sparse</span> with parent to child nesting.</div></div>
 </aside>
+<button class="drawerEdgeToggle" id="toggleRightPanel" aria-controls="rightPanel" aria-expanded="true" title="Hide tools" aria-label="Hide tools"><span>&gt;</span></button>
 </div>
 <div class="toastStack" id="toastStack" aria-live="polite" aria-atomic="true"></div>
 <div class="dialogBackdrop" id="dialogBackdrop">
@@ -442,8 +553,95 @@ const profiles=Object.fromEntries(PROFILE_NAMES.map(name=>[name,emptyProfile()])
 let currentProfile='full', parents=profiles.full.parents, assigned=profiles.full.assigned, activeChild=profiles.full.activeChild, selected=null, hovered=null;
 let showMesh=true, showLabels=false, viewMode='front', scale=1, pan={x:0,y:0}, freeRot={yaw:0,pitch:0}, dragMode=null, last={x:0,y:0}, moved=false;
 let filter={mode:'all', parentId:null, childId:null};
+let transformCache=null;
 const canvas=document.getElementById('canvas'), ctx=canvas.getContext('2d');
 function el(id){return document.getElementById(id)}
+const UI_STORAGE_KEY='mediapipeLandmarkGrouper.ui';
+const uiState=loadUiState();
+function uiClamp(value,min,max){return Math.max(min,Math.min(max,value))}
+function maxLeftPanelWidth(){return Math.max(260,Math.min(560,window.innerWidth-260))}
+function loadUiState(){
+  try{
+    const saved=JSON.parse(localStorage.getItem(UI_STORAGE_KEY)||'{}');
+    return {leftWidth:Number(saved.leftWidth)||300,rightOpen:saved.rightOpen!==false};
+  }catch(e){
+    return {leftWidth:300,rightOpen:true};
+  }
+}
+function saveUiState(){
+  try{localStorage.setItem(UI_STORAGE_KEY,JSON.stringify(uiState));}catch(e){}
+}
+function applyUiState(){
+  uiState.leftWidth=uiClamp(uiState.leftWidth,220,maxLeftPanelWidth());
+  document.documentElement.style.setProperty('--left-panel-width',uiState.leftWidth+'px');
+  document.body.classList.toggle('rightDrawerOpen',uiState.rightOpen);
+  const toggle=el('toggleRightPanel'), drawer=el('rightPanel');
+  if(toggle){
+    const label=uiState.rightOpen?'Hide tools':'Show tools';
+    toggle.querySelector('span').textContent=uiState.rightOpen?'>':'<';
+    toggle.title=label;
+    toggle.setAttribute('aria-label',label);
+    toggle.classList.toggle('activeBtn',uiState.rightOpen);
+    toggle.setAttribute('aria-expanded',String(uiState.rightOpen));
+  }
+  if(drawer)drawer.setAttribute('aria-hidden',String(!uiState.rightOpen));
+  const handle=el('leftResizeHandle');
+  if(handle){
+    handle.setAttribute('aria-valuemax',String(maxLeftPanelWidth()));
+    handle.setAttribute('aria-valuenow',String(Math.round(uiState.leftWidth)));
+  }
+  requestAnimationFrame(resize);
+}
+function setRightDrawer(open){
+  uiState.rightOpen=!!open;
+  applyUiState();
+  saveUiState();
+}
+function initPanelControls(){
+  const leftPanel=el('leftPanel'), handle=el('leftResizeHandle'), toggle=el('toggleRightPanel'), close=el('closeRightPanel');
+  if(toggle)toggle.onclick=()=>setRightDrawer(!uiState.rightOpen);
+  if(close)close.onclick=()=>setRightDrawer(false);
+  window.addEventListener('keydown',e=>{
+    const dialog=el('dialogBackdrop');
+    if(e.key==='Escape'&&uiState.rightOpen&&!(dialog&&dialog.classList.contains('open')))setRightDrawer(false);
+  });
+  if(!leftPanel||!handle)return;
+  let startX=0,startWidth=0;
+  const stopDrag=()=>{
+    document.body.classList.remove('resizingLeft');
+    window.removeEventListener('pointermove',drag);
+    saveUiState();
+  };
+  const drag=e=>{
+    uiState.leftWidth=uiClamp(startWidth+e.clientX-startX,220,maxLeftPanelWidth());
+    applyUiState();
+  };
+  handle.addEventListener('pointerdown',e=>{
+    if(window.matchMedia('(max-width: 760px)').matches)return;
+    e.preventDefault();
+    startX=e.clientX;
+    startWidth=leftPanel.getBoundingClientRect().width;
+    document.body.classList.add('resizingLeft');
+    handle.setPointerCapture(e.pointerId);
+    window.addEventListener('pointermove',drag);
+    window.addEventListener('pointerup',stopDrag,{once:true});
+  });
+  handle.addEventListener('keydown',e=>{
+    const step=e.shiftKey?48:16;
+    if(e.key==='ArrowLeft'||e.key==='ArrowRight'){
+      e.preventDefault();
+      uiState.leftWidth=uiClamp(uiState.leftWidth+(e.key==='ArrowRight'?step:-step),220,maxLeftPanelWidth());
+      applyUiState();
+      saveUiState();
+    }
+    if(e.key==='Home'||e.key==='End'){
+      e.preventDefault();
+      uiState.leftWidth=e.key==='Home'?220:maxLeftPanelWidth();
+      applyUiState();
+      saveUiState();
+    }
+  });
+}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function uid(p='id'){return p+'_'+Date.now()+'_'+Math.random().toString(36).slice(2)}
 function appToast(message,type='info'){
@@ -491,7 +689,7 @@ function pointHasChild(id,cid){return childIdsForPoint(id).has(cid)}
 function primaryChildIdForPoint(id){const ids=[...childIdsForPoint(id)]; return ids.includes(activeChild)?activeChild:(ids[0]||null)}
 function removePointFromChild(id,cid){const found=findChild(cid); if(found)found.child.ids=found.child.ids.filter(x=>x!==id); const ids=assigned.get(id); if(ids){ids.delete(cid); if(!ids.size)assigned.delete(id);}}
 function resize(){const r=canvas.getBoundingClientRect(); canvas.width=Math.max(1,Math.floor(r.width*devicePixelRatio)); canvas.height=Math.max(1,Math.floor(r.height*devicePixelRatio)); draw();}
-window.addEventListener('resize',resize);
+window.addEventListener('resize',()=>{applyUiState();});
 function rotateFree3d(v){
   v=centeredPoint(v);
   const cy=Math.cos(freeRot.yaw), sy=Math.sin(freeRot.yaw), cp=Math.cos(freeRot.pitch), sp=Math.sin(freeRot.pitch);
@@ -499,8 +697,8 @@ function rotateFree3d(v){
   return [x,y,z*cp+v[1]*sp];
 }
 function project(v){if(viewMode==='free3d'){const p=rotateFree3d(v); return [p[0],-p[1]];} if(viewMode==='side')return [v[2],-v[1]]; if(viewMode==='top')return [v[0],-v[2]]; return [v[0],-v[1]];}
-function bounds(){if(viewMode==='free3d')return FREE3D_BOUNDS; let xs=[],ys=[]; for(let i=0;i<MAX_LANDMARKS;i++){const p=project(landmarkPoint(i)); xs.push(p[0]); ys.push(p[1]);} return {minX:Math.min(...xs),maxX:Math.max(...xs),minY:Math.min(...ys),maxY:Math.max(...ys)};}
-function tx(){const b=bounds(), w=canvas.width, h=canvas.height, s=Math.min(w/(b.maxX-b.minX),h/(b.maxY-b.minY))*0.82*scale; return {s,cx:(b.minX+b.maxX)/2,cy:(b.minY+b.maxY)/2,w,h};}
+function bounds(){if(viewMode==='free3d')return FREE3D_BOUNDS; let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity; for(let i=0;i<MAX_LANDMARKS;i++){const p=project(landmarkPoint(i)); minX=Math.min(minX,p[0]); maxX=Math.max(maxX,p[0]); minY=Math.min(minY,p[1]); maxY=Math.max(maxY,p[1]);} return {minX,maxX,minY,maxY};}
+function tx(){const key=viewMode+'|'+scale+'|'+canvas.width+'|'+canvas.height; if(transformCache&&transformCache.key===key)return transformCache; const b=bounds(), w=canvas.width, h=canvas.height, s=Math.min(w/(b.maxX-b.minX),h/(b.maxY-b.minY))*0.82*scale; transformCache={key,s,cx:(b.minX+b.maxX)/2,cy:(b.minY+b.maxY)/2,w,h}; return transformCache;}
 function toScreen(id){const [x,y]=project(landmarkPoint(id)); const t=tx(); return [(x-t.cx)*t.s+t.w/2+pan.x*devicePixelRatio,(y-t.cy)*t.s+t.h/2+pan.y*devicePixelRatio];}
 function fromEvent(e){const r=canvas.getBoundingClientRect(); return {x:(e.clientX-r.left)*devicePixelRatio,y:(e.clientY-r.top)*devicePixelRatio};}
 function nearest(pos){let best=null,bd=1e9; for(let i=0;i<MAX_LANDMARKS;i++){const [x,y]=toScreen(i), d=Math.hypot(x-pos.x,y-pos.y); if(d<bd){bd=d;best=i}} return bd<14*devicePixelRatio?best:null;}
@@ -562,7 +760,7 @@ function validateMappingObject(data){const mappings=isProfileExport(data)?data.p
 function validateJsonBox(){let data; try{data=JSON.parse(el('jsonBox').value)}catch(e){el('validationBox').textContent='Invalid JSON: '+e.message; return null;} return validateMappingObject(data);}
 function replaceProfileFromMapping(name,mapping){const previous={currentProfile,parents,assigned,activeChild}; profiles[name]=emptyProfile(); currentProfile=name; parents=profiles[name].parents; assigned=profiles[name].assigned; activeChild=null; let i=0; for(const [pname,cname,ids] of flattenForImport(mapping||{})){const c=getOrCreateChild(pname,cname,COLORS[i++%COLORS.length]); addIdsToChild(c,ids);} saveProfileState(); currentProfile=previous.currentProfile; if(previous.currentProfile===name){parents=profiles[name].parents; assigned=profiles[name].assigned; activeChild=profiles[name].activeChild;} else {parents=previous.parents; assigned=previous.assigned; activeChild=previous.activeChild;}}
 async function importJson(){let data; try{data=JSON.parse(el('jsonBox').value)}catch(e){appToast('Invalid JSON.','error');return} const report=validateMappingObject(data); if(report.invalidCount&&!(await appConfirm('JSON contains invalid IDs. Import will skip out-of-range points. Continue?','Import JSON','Import',true)))return; const keepProfile=currentProfile; if(isProfileExport(data)){for(const name of PROFILE_NAMES)replaceProfileFromMapping(name,data.profiles[name]||{}); currentProfile=PROFILE_NAMES.includes(keepProfile)?keepProfile:'full';} else {replaceProfileFromMapping(currentProfile,data);} parents=profiles[currentProfile].parents; assigned=profiles[currentProfile].assigned; activeChild=profiles[currentProfile].activeChild; el('profileSelect').value=currentProfile; renderGroups();stats();draw();exportJson(); appToast('JSON imported.','ok');}
-canvas.addEventListener('mousemove',e=>{const pos=fromEvent(e); if(dragMode){const dx=e.clientX-last.x,dy=e.clientY-last.y; if(Math.hypot(dx,dy)>1)moved=true; if(dragMode==='rotate'){freeRot.yaw+=dx*.005; freeRot.pitch=Math.max(-Math.PI*.49,Math.min(Math.PI*.49,freeRot.pitch+dy*.005));} else {pan.x+=dx; pan.y+=dy;} last={x:e.clientX,y:e.clientY};} hovered=nearest(pos); if(hovered==null)el('info').textContent='Hover a point'; else {const memberships=[...childIdsForPoint(hovered)].map(cid=>findChild(cid)).filter(Boolean), v=landmarkPoint(hovered), virtual=IRIS_IDS.has(hovered)?'<br>virtual iris point':'', memberHtml=memberships.length?memberships.map(x=>`<br>${esc(x.parent.name)}: <span style="color:${x.child.color||'#e8edf5'}">${esc(x.child.name)}</span>`).join(''):'free'; el('info').innerHTML=`<b>ID ${hovered}</b>${virtual}<br>x ${v[0].toFixed(3)}<br>y ${v[1].toFixed(3)}<br>z ${v[2].toFixed(3)}<br>${memberHtml}`;} draw();});
+canvas.addEventListener('mousemove',e=>{if(dragMode){const dx=e.clientX-last.x,dy=e.clientY-last.y; if(Math.hypot(dx,dy)>1)moved=true; if(dragMode==='rotate'){freeRot.yaw+=dx*.005; freeRot.pitch=Math.max(-Math.PI*.49,Math.min(Math.PI*.49,freeRot.pitch+dy*.005));} else {pan.x+=dx; pan.y+=dy;} last={x:e.clientX,y:e.clientY}; draw(); return;} const pos=fromEvent(e); hovered=nearest(pos); if(hovered==null)el('info').textContent='Hover a point'; else {const memberships=[...childIdsForPoint(hovered)].map(cid=>findChild(cid)).filter(Boolean), v=landmarkPoint(hovered), virtual=IRIS_IDS.has(hovered)?'<br>virtual iris point':'', memberHtml=memberships.length?memberships.map(x=>`<br>${esc(x.parent.name)}: <span style="color:${x.child.color||'#e8edf5'}">${esc(x.child.name)}</span>`).join(''):'free'; el('info').innerHTML=`<b>ID ${hovered}</b>${virtual}<br>x ${v[0].toFixed(3)}<br>y ${v[1].toFixed(3)}<br>z ${v[2].toFixed(3)}<br>${memberHtml}`;} draw();});
 canvas.addEventListener('mousedown',e=>{moved=false;last={x:e.clientX,y:e.clientY}; dragMode=(viewMode==='free3d'&&e.button===0&&!e.shiftKey)?'rotate':'pan';});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
 window.addEventListener('mouseup',()=>{dragMode=null;});
@@ -575,6 +773,6 @@ el('profileSelect').onchange=e=>useProfile(e.target.value);
 el('exportBtn').onclick=exportJson; el('validateBtn').onclick=validateJsonBox; el('importBtn').onclick=importJson; el('downloadBtn').onclick=()=>{const blob=new Blob([JSON.stringify(exportJson(),null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='mediapipe_landmark_profiles.json'; a.click(); URL.revokeObjectURL(a.href);};
 el('clearAll').onclick=async()=>{if(await appConfirm('Clear current profile?','Clear profile','Clear',true)){resetCurrentProfile();renderGroups();stats();draw();exportJson();appToast('Profile cleared.','ok');}};
 el('resetView').onclick=()=>{scale=1;pan={x:0,y:0};freeRot={yaw:0,pitch:0};draw();}; el('toggleMesh').onclick=e=>{showMesh=!showMesh;e.target.textContent='Mesh: '+(showMesh?'ON':'OFF');draw();}; el('toggleLabels').onclick=e=>{showLabels=!showLabels;e.target.textContent='ID: '+(showLabels?'ON':'OFF');draw();}; el('showAll').onclick=()=>setFilter('all'); el('showUnassigned').onclick=()=>setFilter('unassigned'); el('unassignSelected').onclick=()=>{if(selected!=null)unassign(selected);}; el('viewMode').onchange=e=>{viewMode=e.target.value;scale=1;pan={x:0,y:0};draw();};
-resize(); loadDefaultGroups();
+initPanelControls(); applyUiState(); resize(); loadDefaultGroups();
 </script>
 </body></html>
