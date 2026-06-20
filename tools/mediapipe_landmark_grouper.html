@@ -314,6 +314,142 @@ button.activeBtn{
   font-size:var(--font-small);
 }
 .inlineCheck input{width:auto;margin:0;accent-color:var(--accent)}
+.gridMeta{
+  display:flex;
+  gap:5px;
+  flex-wrap:wrap;
+  margin-top:6px;
+}
+.gridRows{
+  font-size:var(--font-mono);
+  color:var(--faint);
+  margin-top:5px;
+  max-height:62px;
+  overflow:auto;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+.gridRows b{color:var(--muted);font-weight:650}
+.gridControls input{max-width:72px}
+.gridPanel{
+  padding:10px;
+  background:oklch(16% .014 252 / .58);
+}
+.gridPanel .gridControls{
+  align-items:flex-end;
+  gap:10px;
+  margin-top:12px;
+}
+.gridPanel .gridControls label{
+  flex:1 1 86px;
+  align-items:flex-start;
+  flex-direction:column;
+  gap:4px;
+}
+.gridPanel .gridControls input{
+  max-width:none;
+  width:100%;
+  height:34px;
+  font-size:13px;
+}
+.gridPanel .actions{
+  gap:7px;
+  margin-top:10px;
+}
+.gridPanel .actions button{
+  flex:1 1 92px;
+  min-height:30px;
+}
+.gridPanel .gridMeta{
+  margin-top:11px;
+}
+.gridPanel .gridRows{
+  max-height:180px;
+  margin-top:10px;
+  padding:8px;
+  border:1px solid var(--line-soft);
+  border-radius:7px;
+  background:oklch(12% .012 252 / .36);
+  line-height:1.55;
+}
+.gridExpandWrap{
+  display:grid;
+  grid-template-columns:28px minmax(0,1fr) 28px;
+  grid-template-rows:28px auto 28px;
+  gap:5px;
+  align-items:center;
+  margin-top:11px;
+}
+.gridAddButton{
+  width:28px;
+  height:28px;
+  padding:0;
+  display:grid;
+  place-items:center;
+  color:oklch(91% .025 221);
+  border-color:oklch(54% .095 221 / .44);
+  background:oklch(28% .038 221 / .62);
+  font-size:16px;
+  font-weight:720;
+  line-height:1;
+}
+.gridAddButton:hover{background:oklch(35% .06 221 / .72)}
+.gridAddButton:disabled{
+  opacity:.34;
+  cursor:not-allowed;
+}
+.gridAddTop{grid-column:2;grid-row:1;justify-self:center}
+.gridAddBottom{grid-column:2;grid-row:3;justify-self:center}
+.gridAddLeft{grid-column:1;grid-row:2;justify-self:center}
+.gridAddRight{grid-column:3;grid-row:2;justify-self:center}
+.gridMini{
+  position:relative;
+  grid-column:2;
+  grid-row:2;
+  display:grid;
+  gap:3px;
+  min-height:72px;
+  padding:8px;
+  border:1px solid var(--line-soft);
+  border-radius:7px;
+  background:oklch(12% .012 252 / .36);
+  overflow:hidden;
+}
+.gridMiniAxis{
+  position:absolute;
+  top:7px;
+  bottom:7px;
+  width:2px;
+  border-radius:99px;
+  background:oklch(76% .11 78 / .86);
+  box-shadow:0 0 0 1px oklch(12% .012 252 / .54);
+  pointer-events:none;
+}
+.gridMiniCell{
+  min-width:0;
+  min-height:18px;
+  display:grid;
+  place-items:center;
+  border:1px solid oklch(57% .13 25 / .54);
+  border-radius:4px;
+  background:oklch(29% .052 25 / .62);
+  color:oklch(86% .045 25);
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-size:8px;
+  line-height:1;
+}
+.gridMiniCell.snapped{
+  background:oklch(34% .06 221 / .48);
+  border-color:oklch(58% .1 221 / .58);
+  color:oklch(91% .025 221);
+}
+.gridLegend{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  margin-top:6px;
+  color:var(--faint);
+  font-size:var(--font-small);
+}
 .indentLabel{font-size:var(--font-small);color:var(--faint)}
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .stat{
@@ -513,24 +649,24 @@ button.activeBtn{
 <body>
 <div class="app">
 <aside class="leftPanel" id="leftPanel">
-  <div class="section"><h2>Profile</h2><div class="col"><select id="profileSelect"><option value="full">Full</option><option value="dense">Dense</option><option value="sparse">Sparse</option><option value="roto">Roto</option></select><div class="small" id="profileHint">Profiles keep separate group sets. Export includes full, dense, sparse, and roto.</div></div></div>
-  <div class="section"><h2>Parent</h2><div class="col"><input id="parentName" placeholder="e.g. nose"><button class="primary" id="addParent">Create parent</button><div class="small">Parents organize child groups. Points are assigned only to children.</div></div></div>
-  <div class="section"><h2>Child</h2><div class="col"><select id="parentSelect"></select><input id="childName" placeholder="e.g. left_nostril"><div class="row"><input id="childColor" type="color" value="#7cc7ff" style="width:56px;padding:4px;height:34px"><button class="primary" id="addChild">Create child</button></div><div class="small">Click landmarks to add them to the active child. Shared IDs are allowed.</div></div></div>
-  <div class="section"><h2>Groups</h2><div id="groups"></div></div>
+  <div class="section"><h2>Profile</h2><div class="col"><select id="profileSelect"><option value="full">Full</option><option value="dense">Dense</option><option value="sparse">Sparse</option><option value="roto">Roto</option><option value="grid">Grid</option></select><div class="small" id="profileHint">Profiles keep separate group sets. Export includes full, dense, sparse, roto, and grid.</div></div></div>
+  <div class="section" id="parentSection"><h2>Parent</h2><div class="col"><input id="parentName" placeholder="e.g. nose"><button class="primary" id="addParent">Create parent</button><div class="small">Parents organize child groups. Points are assigned only to children.</div></div></div>
+  <div class="section" id="childSection"><h2>Child</h2><div class="col"><select id="parentSelect"></select><input id="childName" placeholder="e.g. left_nostril"><div class="row"><input id="childColor" type="color" value="#7cc7ff" style="width:56px;padding:4px;height:34px"><button class="primary" id="addChild">Create child</button></div><div class="small">Click landmarks to add them to the active child. Shared IDs are allowed.</div></div></div>
+  <div class="section"><h2 id="groupsTitle">Groups</h2><div id="groups"></div></div>
   <div class="leftResizeHandle" id="leftResizeHandle" role="separator" aria-orientation="vertical" aria-label="Resize groups panel" aria-valuemin="220" aria-valuemax="560" aria-valuenow="300" tabindex="0"></div>
 </aside>
 <main>
   <canvas id="canvas"></canvas>
-  <div class="toolbar"><select id="viewMode"><option value="front">Front X/Y</option><option value="unwrap">Unwrap</option><option value="side">Side Z/Y</option><option value="top">Top X/Z</option><option value="free3d">Free 3D</option></select><label class="rangeControl" title="Blend front landmarks with OBJ UV unwrap">Unwrap <input id="unwrapStrength" type="range" min="0" max="1" step="0.01" value="0"><span id="unwrapStrengthValue">0.00</span></label><button id="resetView">Reset</button><button id="toggleMesh">Mesh: ON</button><button id="toggleLabels">ID: OFF</button><button id="showAll">Show all</button><button id="showUnassigned">Show unassigned</button><button id="unassignSelected">Unassign selected</button></div>
+  <div class="toolbar"><select id="viewMode"><option value="front">Front X/Y</option><option value="unwrap">Unwrap</option><option value="side">Side Z/Y</option><option value="top">Top X/Z</option><option value="free3d">Free 3D</option></select><label class="rangeControl" title="Blend front landmarks with OBJ UV unwrap">Unwrap <input id="unwrapStrength" type="range" min="0" max="1" step="0.01" value="0"><span id="unwrapStrengthValue">0.00</span></label><button id="resetView">Reset</button><button id="toggleMesh">Mesh: ON</button><button id="toggleLabels">ID: OFF</button><button id="toggleGridSymmetry">Symmetry: ON</button><button id="showAll">Show all</button><button id="showUnassigned">Show unassigned</button><button id="unassignSelected">Unassign selected</button></div>
   <div class="info" id="info">Hover a point</div>
   <div class="hint">Scroll zooms. Drag pans. Unwrap is a relaxed flat front layout. In <span class="kbd">Free 3D</span>, drag rotates and <span class="kbd">Shift</span> + drag pans. Click assigns. <span class="kbd">Alt</span> + click removes.</div>
 </main>
 <aside class="rightDrawer" id="rightPanel">
   <div class="drawerHeader"><h2>Tools</h2><button class="iconButton" id="closeRightPanel" title="Hide tools" aria-label="Hide tools">x</button></div>
   <div class="section stats"><div class="stat"><span class="small">Used IDs</span><b id="assignedCount">0</b></div><div class="stat"><span class="small">Free IDs</span><b id="freeCount">478</b></div></div>
-  <div class="section"><h2>Manual IDs</h2><div class="col"><input id="manualIds" placeholder="e.g. 1, 2, 4 or 10-20"><button class="ok" id="addManual">Add to active child</button><div class="small">Supports 0-477, including iris IDs 468-477. Existing IDs are skipped.</div></div></div>
+  <div class="section" id="manualSection"><h2>Manual IDs</h2><div class="col"><input id="manualIds" placeholder="e.g. 1, 2, 4 or 10-20"><button class="ok" id="addManual">Add to active child</button><div class="small">Supports 0-477, including iris IDs 468-477. Existing IDs are skipped.</div></div></div>
   <div class="section"><h2>Import / Export</h2><div class="col"><button class="primary" id="exportBtn">Generate JSON</button><button id="validateBtn">Validate JSON</button><div class="report" id="validationBox">Not validated yet.</div><button id="downloadBtn">Download profiles.json</button><textarea id="jsonBox" spellcheck="false"></textarea><button id="importBtn">Import JSON</button><button class="danger" id="clearAll">Clear current profile</button></div></div>
-  <div class="section"><h2>Format</h2><div class="small">Export stores <span class="kbd">profiles.full</span>, <span class="kbd">profiles.dense</span>, <span class="kbd">profiles.sparse</span>, and <span class="kbd">profiles.roto</span> with parent to child nesting. Roto children export <span class="kbd">ids</span> in contour order plus <span class="kbd">openSpline</span>.</div></div>
+  <div class="section"><h2>Format</h2><div class="small">Export stores regular profiles with parent to child nesting. Roto children export <span class="kbd">ids</span> in contour order plus <span class="kbd">openSpline</span>. Grid exports one direct <span class="kbd">profiles.grid</span> object with <span class="kbd">rows</span>, row-matrix <span class="kbd">ids</span>, and derived <span class="kbd">quads</span>.</div></div>
 </aside>
 <button class="drawerEdgeToggle" id="toggleRightPanel" aria-controls="rightPanel" aria-expanded="true" title="Hide tools" aria-label="Hide tools"><span>&gt;</span></button>
 </div>
@@ -622,6 +758,12 @@ function setUnwrapStrength(value,immediate=false){
 function updateViewControls(){
   const control=document.querySelector('.rangeControl');
   if(control)control.classList.toggle('hidden',viewMode!=='unwrap');
+  const symmetry=el('toggleGridSymmetry');
+  if(symmetry){
+    symmetry.style.display=isGridProfile()?'':'none';
+    symmetry.textContent='Symmetry: '+(showGridSymmetry?'ON':'OFF');
+    symmetry.classList.toggle('activeBtn',showGridSymmetry);
+  }
 }
 const DEFAULT_GROUPS_478 = {
   lips: [0,13,14,17,37,39,40,61,78,80,81,82,84,87,88,91,95,146,178,181,185,191,267,269,270,291,308,310,311,312,314,317,318,321,324,375,402,405,409,415],
@@ -635,18 +777,21 @@ const DEFAULT_GROUPS_478 = {
   nose: [1,2,4,5,6,19,45,48,64,94,97,98,115,168,195,197,220,275,278,294,326,327,344,440]
 };
 const COLORS=['#7cc7ff','#55d68a','#ffcc66','#ff7aa2','#b6f36b','#93c5fd','#d8b4fe','#fdba74','#a7f3d0','#fca5a5','#f0abfc','#67e8f9'];
-const PROFILE_NAMES=['full','dense','sparse','roto'];
+const PROFILE_NAMES=['full','dense','sparse','roto','grid'];
 const PROFILE_HINTS={
   full:'Full profile uses regular unordered landmark groups.',
   dense:'Dense profile uses separate regular landmark groups.',
   sparse:'Sparse profile uses separate regular landmark groups.',
-  roto:'Roto profile is for face-part contours. Click landmarks in outline order; use Open spline for nose bridge.'
+  roto:'Roto profile is for face-part contours. Click landmarks in outline order; use Open spline for nose bridge.',
+  grid:'Grid profile builds an expandable overlay in Unwrap view. Drag grid handles onto landmarks; Symmetry moves the mirrored handle too.'
 };
-const INITIAL_PROFILE_EXPORT={"profiles":{"full":{"mouth":{"lips":[0,13,14,17,37,39,40,61,78,80,81,82,84,87,88,91,95,146,178,181,185,191,267,269,270,291,308,310,311,312,314,317,318,321,324,375,402,405,409,415]},"eyes":{"left_eye":[249,263,362,373,374,380,381,382,384,385,386,387,388,390,398,466],"right_eye":[7,33,133,144,145,153,154,155,157,158,159,160,161,163,173,246],"left_iris":[468,469,470,471,472],"right_iris":[473,474,475,476,477]},"eyebrows":{"left_eyebrow":[276,282,283,285,293,295,296,300,334,336],"right_eyebrow":[46,52,53,55,63,65,66,70,105,107]},"face":{"oval":[10,21,54,58,67,93,103,109,127,132,136,148,149,150,152,162,172,176,234,251,284,288,297,323,332,338,356,361,365,377,378,379,389,397,400,454]},"nose":{"all":[1,2,4,5,6,19,45,48,64,94,97,98,115,168,195,197,220,275,278,294,326,327,344,440]}},"dense":{},"sparse":{},"roto":{"eyes":{"left_eye":{"ids":[33,246,160,158,173,133,155,153,144,7],"openSpline":false},"left_iris":{"ids":[476,475,474,477],"openSpline":false},"right_eye":{"ids":[263,466,387,385,398,362,382,380,373,249],"openSpline":false},"right_iris":{"ids":[471,470,469,472],"openSpline":false},"left_eyebrow":{"ids":[107,55,65,52,53,46,124,156,70,63,105,66],"openSpline":false},"right_eyebrow":{"ids":[336,296,334,293,300,383,353,276,283,282,295,285],"openSpline":false},"left_socket":{"ids":[35,124,46,53,52,65,55,193,245,128,121,120,119,118,117,111],"openSpline":false},"right_socket":{"ids":[265,353,276,283,282,295,285,417,465,357,350,349,348,347,346,340],"openSpline":false}},"mouth":{"lip_upper":{"ids":[0,267,269,270,409,291,306,292,308,415,310,311,312,13,82,81,80,191,78,62,76,61,185,40,39,37],"openSpline":false},"lip_lower":{"ids":[14,317,402,318,324,308,292,306,291,375,321,405,314,17,84,181,91,146,61,76,62,78,95,88,178,87],"openSpline":false},"mouth_outer":{"ids":[57,186,92,165,167,393,391,322,410,287,273,335,313,83,106,43],"openSpline":false},"mouth_inner":{"ids":[61,185,40,39,37,0,267,269,270,409,291,375,321,405,314,17,84,181,91,146],"openSpline":false}},"nose":{"nose_shape":{"ids":[9,336,285,417,465,357,350,349,329,371,358,327,326,97,98,129,142,100,120,121,128,245,193,55,107],"openSpline":false},"right_nostril":{"ids":[392,305,290,250,458,309],"openSpline":false},"left_nostril":{"ids":[79,238,20,60,75,166],"openSpline":false},"bridge":{"ids":[9,336,285,417,351,419,275,4,45,196,122,193,55,107],"openSpline":false}},"face":{"chin":{"ids":[214,135,136,150,149,176,148,152,377,400,378,379,365,364,434,432,287,273,335,313,83,106,43,57,212],"openSpline":false},"forehead":{"ids":[10,297,284,251,389,368,383,300,293,334,296,336,9,107,66,105,63,70,156,139,162,21,54,67],"openSpline":false},"left_cheek":{"ids":[120,100,142,129,98,165,92,186,57,212,214,192,213,147,123,116,111,117,118,119],"openSpline":false},"left_jaw":{"ids":[234,227,116,123,147,213,192,214,135,136,172,58,132,93],"openSpline":false},"right_cheek":{"ids":[349,348,347,346,340,345,352,376,433,416,434,432,287,410,322,391,327,358,371,329],"openSpline":false},"right_jaw":{"ids":[454,447,345,352,376,433,416,434,364,365,397,288,361,323],"openSpline":false},"left_temple":{"ids":[162,139,156,124,35,111,116,227,234,127],"openSpline":false},"right_temple":{"ids":[389,356,454,447,345,340,265,353,383,368],"openSpline":false},"symetry_axis":{"ids":[10,151,9,8,168,6,197,195,5,4,1,19,94,2,164,0,11,12,13,14,15,16,17,18,200,199,175,152],"openSpline":true},"philtrum":{"ids":[98,97,326,327,391,269,267,0,37,39,165],"openSpline":false}}}}};
+const INITIAL_PROFILE_EXPORT={"profiles":{"full":{"mouth":{"lips":[0,13,14,17,37,39,40,61,78,80,81,82,84,87,88,91,95,146,178,181,185,191,267,269,270,291,308,310,311,312,314,317,318,321,324,375,402,405,409,415]},"eyes":{"left_eye":[249,263,362,373,374,380,381,382,384,385,386,387,388,390,398,466],"right_eye":[7,33,133,144,145,153,154,155,157,158,159,160,161,163,173,246],"left_iris":[468,469,470,471,472],"right_iris":[473,474,475,476,477]},"eyebrows":{"left_eyebrow":[276,282,283,285,293,295,296,300,334,336],"right_eyebrow":[46,52,53,55,63,65,66,70,105,107]},"face":{"oval":[10,21,54,58,67,93,103,109,127,132,136,148,149,150,152,162,172,176,234,251,284,288,297,323,332,338,356,361,365,377,378,379,389,397,400,454]},"nose":{"all":[1,2,4,5,6,19,45,48,64,94,97,98,115,168,195,197,220,275,278,294,326,327,344,440]}},"dense":{},"sparse":{},"grid":{},"roto":{"eyes":{"left_eye":{"ids":[33,246,160,158,173,133,155,153,144,7],"openSpline":false},"left_iris":{"ids":[476,475,474,477],"openSpline":false},"right_eye":{"ids":[263,466,387,385,398,362,382,380,373,249],"openSpline":false},"right_iris":{"ids":[471,470,469,472],"openSpline":false},"left_eyebrow":{"ids":[107,55,65,52,53,46,124,156,70,63,105,66],"openSpline":false},"right_eyebrow":{"ids":[336,296,334,293,300,383,353,276,283,282,295,285],"openSpline":false},"left_socket":{"ids":[35,124,46,53,52,65,55,193,245,128,121,120,119,118,117,111],"openSpline":false},"right_socket":{"ids":[265,353,276,283,282,295,285,417,465,357,350,349,348,347,346,340],"openSpline":false}},"mouth":{"lip_upper":{"ids":[0,267,269,270,409,291,306,292,308,415,310,311,312,13,82,81,80,191,78,62,76,61,185,40,39,37],"openSpline":false},"lip_lower":{"ids":[14,317,402,318,324,308,292,306,291,375,321,405,314,17,84,181,91,146,61,76,62,78,95,88,178,87],"openSpline":false},"mouth_outer":{"ids":[57,186,92,165,167,393,391,322,410,287,273,335,313,83,106,43],"openSpline":false},"mouth_inner":{"ids":[61,185,40,39,37,0,267,269,270,409,291,375,321,405,314,17,84,181,91,146],"openSpline":false}},"nose":{"nose_shape":{"ids":[9,336,285,417,465,357,350,349,329,371,358,327,326,97,98,129,142,100,120,121,128,245,193,55,107],"openSpline":false},"right_nostril":{"ids":[392,305,290,250,458,309],"openSpline":false},"left_nostril":{"ids":[79,238,20,60,75,166],"openSpline":false},"bridge":{"ids":[9,336,285,417,351,419,275,4,45,196,122,193,55,107],"openSpline":false}},"face":{"chin":{"ids":[214,135,136,150,149,176,148,152,377,400,378,379,365,364,434,432,287,273,335,313,83,106,43,57,212],"openSpline":false},"forehead":{"ids":[10,297,284,251,389,368,383,300,293,334,296,336,9,107,66,105,63,70,156,139,162,21,54,67],"openSpline":false},"left_cheek":{"ids":[120,100,142,129,98,165,92,186,57,212,214,192,213,147,123,116,111,117,118,119],"openSpline":false},"left_jaw":{"ids":[234,227,116,123,147,213,192,214,135,136,172,58,132,93],"openSpline":false},"right_cheek":{"ids":[349,348,347,346,340,345,352,376,433,416,434,432,287,410,322,391,327,358,371,329],"openSpline":false},"right_jaw":{"ids":[454,447,345,352,376,433,416,434,364,365,397,288,361,323],"openSpline":false},"left_temple":{"ids":[162,139,156,124,35,111,116,227,234,127],"openSpline":false},"right_temple":{"ids":[389,356,454,447,345,340,265,353,383,368],"openSpline":false},"symetry_axis":{"ids":[10,151,9,8,168,6,197,195,5,4,1,19,94,2,164,0,11,12,13,14,15,16,17,18,200,199,175,152],"openSpline":true},"philtrum":{"ids":[98,97,326,327,391,269,267,0,37,39,165],"openSpline":false}}}}};
+const GRID_SYMMETRY_AXIS_IDS=[10,151,9,8,168,6,197,195,5,4,1,19,94,2,164,0,11,12,13,14,15,16,17,18,200,199,175,152];
 function emptyProfile(){return {parents:[],assigned:new Map(),activeChild:null}}
 const profiles=Object.fromEntries(PROFILE_NAMES.map(name=>[name,emptyProfile()]));
 let currentProfile='full', parents=profiles.full.parents, assigned=profiles.full.assigned, activeChild=profiles.full.activeChild, selected=null, hovered=null;
 let showMesh=true, showLabels=false, viewMode='front', scale=1, pan={x:0,y:0}, freeRot={yaw:0,pitch:0}, dragMode=null, last={x:0,y:0}, moved=false;
+let showGridSymmetry=true, gridDrag=null;
 let filter={mode:'all', parentId:null, childId:null};
 let transformCache=null;
 const canvas=document.getElementById('canvas'), ctx=canvas.getContext('2d');
@@ -667,6 +812,7 @@ function saveUiState(){
   try{localStorage.setItem(UI_STORAGE_KEY,JSON.stringify(uiState));}catch(e){}
 }
 function applyUiState(){
+  if(isGridProfile()&&uiState.leftWidth<380)uiState.leftWidth=380;
   uiState.leftWidth=uiClamp(uiState.leftWidth,220,maxLeftPanelWidth());
   document.documentElement.style.setProperty('--left-panel-width',uiState.leftWidth+'px');
   document.body.classList.toggle('rightDrawerOpen',uiState.rightOpen);
@@ -773,18 +919,42 @@ function appDialog({title,message='',value='',input=false,okText='OK',danger=fal
 function appConfirm(message,title='Confirm',okText='OK',danger=false){return appDialog({title,message,okText,danger});}
 function appPrompt(title,value=''){return appDialog({title,value,input:true,okText:'Save'});}
 function isRotoProfile(name=currentProfile){return name==='roto'}
+function isGridProfile(name=currentProfile){return name==='grid'}
 function updateProfileHint(){const h=el('profileHint'); if(h)h.textContent=PROFILE_HINTS[currentProfile]||'Profiles keep separate group sets.';}
+function updateProfileUi(){const grid=isGridProfile(); const parentSection=el('parentSection'), childSection=el('childSection'), manualSection=el('manualSection'), groupsTitle=el('groupsTitle'), view=el('viewMode'), unwrap=el('unwrapStrength'); if(parentSection)parentSection.style.display=grid?'none':''; if(childSection)childSection.style.display=grid?'none':''; if(manualSection)manualSection.style.display=grid?'none':''; if(groupsTitle)groupsTitle.textContent=grid?'Grid':'Groups'; if(grid){viewMode='unwrap'; if(view)view.value='unwrap'; if(unwrap)unwrap.disabled=true; setUnwrapStrength(1,true);} if(view)view.disabled=grid; if(!grid&&unwrap)unwrap.disabled=false; updateViewControls();}
+function ensureGridProfileRoot(){if(!isGridProfile())return null; let p=parents[0]; if(!p){p={id:uid('p'),name:'grid',children:[],collapsed:false}; parents=[p]; profiles.grid.parents=parents;} let c=p.children[0]; if(!c){c=makeChild('grid',COLORS[0]); p.children=[c];} ensureGridChild(c); syncGridAssigned(c); activeChild=c.id; profiles.grid.activeChild=activeChild; return c;}
 function saveProfileState(){profiles[currentProfile].parents=parents; profiles[currentProfile].assigned=assigned; profiles[currentProfile].activeChild=activeChild}
-function useProfile(name){saveProfileState(); currentProfile=PROFILE_NAMES.includes(name)?name:'full'; const state=profiles[currentProfile]; parents=state.parents; assigned=state.assigned; activeChild=state.activeChild; filter={mode:'all',parentId:null,childId:null}; selected=null; hovered=null; updateProfileHint(); renderGroups();stats();draw();exportJson();}
-function resetCurrentProfile(){parents=[]; assigned=new Map(); activeChild=null; profiles[currentProfile]= {parents,assigned,activeChild}; selected=null; filter={mode:'all',parentId:null,childId:null};}
-function resetAllProfiles(){for(const name of PROFILE_NAMES)profiles[name]=emptyProfile(); currentProfile='full'; parents=profiles.full.parents; assigned=profiles.full.assigned; activeChild=null; selected=null; filter={mode:'all',parentId:null,childId:null}; const ps=el('profileSelect'); if(ps)ps.value=currentProfile; updateProfileHint();}
+function useProfile(name){saveProfileState(); currentProfile=PROFILE_NAMES.includes(name)?name:'full'; const state=profiles[currentProfile]; parents=state.parents; assigned=state.assigned; activeChild=state.activeChild; filter={mode:'all',parentId:null,childId:null}; selected=null; hovered=null; updateProfileHint(); updateProfileUi(); ensureGridProfileRoot(); renderGroups();stats();draw();exportJson();}
+function resetCurrentProfile(){parents=[]; assigned=new Map(); activeChild=null; profiles[currentProfile]= {parents,assigned,activeChild}; selected=null; filter={mode:'all',parentId:null,childId:null}; ensureGridProfileRoot();}
+function resetAllProfiles(){for(const name of PROFILE_NAMES)profiles[name]=emptyProfile(); currentProfile='full'; parents=profiles.full.parents; assigned=profiles.full.assigned; activeChild=null; selected=null; filter={mode:'all',parentId:null,childId:null}; const ps=el('profileSelect'); if(ps)ps.value=currentProfile; updateProfileHint(); updateProfileUi();}
 function allChildren(){return parents.flatMap(p=>p.children.map(c=>({...c,parent:p})))}
 function findChild(id){for(const p of parents){const c=p.children.find(x=>x.id===id); if(c)return {parent:p,child:c};} return null}
 function childIdsOfParent(pid){const p=parents.find(x=>x.id===pid); return new Set((p?.children||[]).map(c=>c.id))}
 function childIdsForPoint(id){return assigned.get(id)||new Set()}
 function pointHasChild(id,cid){return childIdsForPoint(id).has(cid)}
 function primaryChildIdForPoint(id){const ids=[...childIdsForPoint(id)]; return ids.includes(activeChild)?activeChild:(ids[0]||null)}
-function removePointFromChild(id,cid){const found=findChild(cid); if(found)found.child.ids=found.child.ids.filter(x=>x!==id); const ids=assigned.get(id); if(ids){ids.delete(cid); if(!ids.size)assigned.delete(id);}}
+function ensureGridChild(c){if(!c.grid||!Array.isArray(c.grid.points))createGrid(c,Number(c.grid?.cols)||3,Number(c.grid?.rows)||2); return c;}
+function gridIndex(c,row,col){return row*c.grid.cols+col;}
+function gridPoint(c,row,col){return c.grid.points[gridIndex(c,row,col)];}
+function gridIdsMatrix(c){ensureGridChild(c); const out=[]; for(let r=0;r<c.grid.rows;r++){const row=[]; for(let col=0;col<c.grid.cols;col++)row.push(gridPoint(c,r,col).id??null); out.push(row);} return out;}
+function gridCompleteQuads(c){ensureGridChild(c); const quads=[]; for(let r=0;r<c.grid.rows-1;r++){for(let col=0;col<c.grid.cols-1;col++){const ids=[gridPoint(c,r,col).id,gridPoint(c,r,col+1).id,gridPoint(c,r+1,col+1).id,gridPoint(c,r+1,col).id]; if(ids.every(id=>id!=null))quads.push(ids);}} return quads;}
+function gridStats(c){ensureGridChild(c); const snapped=c.grid.points.filter(p=>p.id!=null).length; return {cols:c.grid.cols,rows:c.grid.rows,total:c.grid.points.length,snapped,quads:gridCompleteQuads(c).length};}
+function syncGridAssigned(c){assigned=new Map(); c.ids=[]; if(!c)return; for(const p of c.grid.points){if(p.id==null)continue; c.ids.push(p.id); if(!assigned.has(p.id))assigned.set(p.id,new Set()); assigned.get(p.id).add(c.id);} profiles.grid.assigned=assigned;}
+function normalizeGridCols(cols){return Math.max(2,Math.min(33,Math.round(Number(cols)||3)));}
+function normalizeGridRows(rows){return Math.max(2,Math.min(32,Math.round(Number(rows)||2)));}
+function createGrid(c,cols=3,rows=2){cols=normalizeGridCols(cols); rows=normalizeGridRows(rows); const b=UNWRAP_BOUNDS, padX=(b.maxX-b.minX)*.12, padY=(b.maxY-b.minY)*.1, minX=b.minX+padX, maxX=b.maxX-padX, minY=b.minY+padY, maxY=b.maxY-padY, points=[]; for(let r=0;r<rows;r++){for(let col=0;col<cols;col++){const x=minX+(maxX-minX)*col/(cols-1), y=minY+(maxY-minY)*r/(rows-1); points.push({row:r,col,x,y,id:null});}} c.grid={cols,rows,points}; c.ids=[]; syncGridAssigned(c); return c;}
+function setGridSize(c,cols,rows){createGrid(c,cols,rows); renderGroups();stats();draw();exportJson();}
+function cloneGridPoint(p,row,col){return {row,col,x:p.x,y:p.y,id:p.id??null};}
+function avgColumnX(c,col){let sum=0; for(let r=0;r<c.grid.rows;r++)sum+=gridPoint(c,r,col).x; return sum/c.grid.rows;}
+function gridHorizontalCenterX(c){let sum=0; for(const p of c.grid.points)sum+=p.x; return sum/c.grid.points.length;}
+function gridSymmetryCenterX(){return GRID_SYMMETRY_AXIS_IDS.reduce((sum,id)=>sum+UNWRAP_LAYOUT[id][0],0)/GRID_SYMMETRY_AXIS_IDS.length;}
+function gridLeftEdgeIsFirst(c){const first=avgColumnX(c,0), last=avgColumnX(c,c.grid.cols-1); if(Math.abs(first-last)>.000001)return first<last; return first<=Math.min(gridHorizontalCenterX(c),gridSymmetryCenterX());}
+function gridMiniAxisPercent(c){const first=avgColumnX(c,0), last=avgColumnX(c,c.grid.cols-1), min=Math.min(first,last), max=Math.max(first,last), span=max-min; if(span<=.000001)return 50; return Math.max(0,Math.min(100,(gridSymmetryCenterX()-min)/span*100));}
+function normalizeGridPointIndexes(c){for(let r=0;r<c.grid.rows;r++){for(let col=0;col<c.grid.cols;col++){const p=gridPoint(c,r,col); p.row=r; p.col=col;}}}
+function extrapolateBefore(a,b,row,col){return {row,col,x:a.x-(b.x-a.x),y:a.y-(b.y-a.y),id:null};}
+function extrapolateAfter(a,b,row,col){return {row,col,x:b.x+(b.x-a.x),y:b.y+(b.y-a.y),id:null};}
+function addGridEdge(c,side){ensureGridChild(c); const cols=c.grid.cols, rows=c.grid.rows; if((side==='left'||side==='right')&&cols>=33)return; if((side==='top'||side==='bottom')&&rows>=32)return; const points=[]; if(side==='top'){for(let col=0;col<cols;col++){points.push(extrapolateBefore(gridPoint(c,0,col),gridPoint(c,1,col),0,col));} for(let r=0;r<rows;r++){for(let col=0;col<cols;col++)points.push(cloneGridPoint(gridPoint(c,r,col),r+1,col));} c.grid.rows=rows+1; c.grid.points=points;} else if(side==='bottom'){for(let r=0;r<rows;r++){for(let col=0;col<cols;col++)points.push(cloneGridPoint(gridPoint(c,r,col),r,col));} for(let col=0;col<cols;col++){points.push(extrapolateAfter(gridPoint(c,rows-2,col),gridPoint(c,rows-1,col),rows,col));} c.grid.rows=rows+1; c.grid.points=points;} else {const addAtStart=side==='left'?gridLeftEdgeIsFirst(c):!gridLeftEdgeIsFirst(c); for(let r=0;r<rows;r++){if(addAtStart)points.push(extrapolateBefore(gridPoint(c,r,0),gridPoint(c,r,1),r,0)); for(let col=0;col<cols;col++)points.push(cloneGridPoint(gridPoint(c,r,col),r,col+(addAtStart?1:0))); if(!addAtStart)points.push(extrapolateAfter(gridPoint(c,r,cols-2),gridPoint(c,r,cols-1),r,cols));} c.grid.cols=cols+1; c.grid.points=points;} normalizeGridPointIndexes(c); syncGridAssigned(c); renderGroups();stats();draw();exportJson();}
+function removePointFromChild(id,cid){const found=findChild(cid); if(found){found.child.ids=found.child.ids.filter(x=>x!==id); if(isGridProfile()&&found.child.grid){for(const p of found.child.grid.points){if(p.id===id)p.id=null;}}} const ids=assigned.get(id); if(ids){ids.delete(cid); if(!ids.size)assigned.delete(id);}}
 function resize(){const r=canvas.getBoundingClientRect(); canvas.width=Math.max(1,Math.floor(r.width*devicePixelRatio)); canvas.height=Math.max(1,Math.floor(r.height*devicePixelRatio)); draw();}
 window.addEventListener('resize',()=>{applyUiState();});
 function rotateFree3d(v){
@@ -797,22 +967,33 @@ function project(v,id=null){if(viewMode==='unwrap'&&id!=null)return UNWRAP_LAYOU
 function bounds(){if(viewMode==='free3d')return FREE3D_BOUNDS; if(viewMode==='unwrap')return UNWRAP_BOUNDS; let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity; for(let i=0;i<MAX_LANDMARKS;i++){const p=project(landmarkPoint(i),i); minX=Math.min(minX,p[0]); maxX=Math.max(maxX,p[0]); minY=Math.min(minY,p[1]); maxY=Math.max(maxY,p[1]);} return {minX,maxX,minY,maxY};}
 function tx(){const key=viewMode+'|'+scale+'|'+canvas.width+'|'+canvas.height; if(transformCache&&transformCache.key===key)return transformCache; const b=bounds(), w=canvas.width, h=canvas.height, s=Math.min(w/(b.maxX-b.minX),h/(b.maxY-b.minY))*0.82*scale; transformCache={key,s,cx:(b.minX+b.maxX)/2,cy:(b.minY+b.maxY)/2,w,h}; return transformCache;}
 function toScreen(id){const [x,y]=project(landmarkPoint(id),id); const t=tx(); return [(x-t.cx)*t.s+t.w/2+pan.x*devicePixelRatio,(y-t.cy)*t.s+t.h/2+pan.y*devicePixelRatio];}
+function worldToScreen(p){const t=tx(); return [(p.x-t.cx)*t.s+t.w/2+pan.x*devicePixelRatio,(p.y-t.cy)*t.s+t.h/2+pan.y*devicePixelRatio];}
+function screenToWorld(pos){const t=tx(); return {x:(pos.x-t.w/2-pan.x*devicePixelRatio)/t.s+t.cx,y:(pos.y-t.h/2-pan.y*devicePixelRatio)/t.s+t.cy};}
 function fromEvent(e){const r=canvas.getBoundingClientRect(); return {x:(e.clientX-r.left)*devicePixelRatio,y:(e.clientY-r.top)*devicePixelRatio};}
 function nearest(pos){let best=null,bd=1e9; for(let i=0;i<MAX_LANDMARKS;i++){const [x,y]=toScreen(i), d=Math.hypot(x-pos.x,y-pos.y); if(d<bd){bd=d;best=i}} return bd<14*devicePixelRatio?best:null;}
+function nearestLandmarkWorld(p){let best=0,bd=Infinity; for(let i=0;i<MAX_LANDMARKS;i++){const q=UNWRAP_LAYOUT[i], d=(q[0]-p.x)*(q[0]-p.x)+(q[1]-p.y)*(q[1]-p.y); if(d<bd){bd=d; best=i;}} return best;}
+function snapGridPointToWorld(point,p){const id=nearestLandmarkWorld(p), q=UNWRAP_LAYOUT[id]; point.x=q[0]; point.y=q[1]; point.id=id;}
+function axisPolylineWorld(){return GRID_SYMMETRY_AXIS_IDS.map(id=>({x:UNWRAP_LAYOUT[id][0],y:UNWRAP_LAYOUT[id][1]}));}
+function reflectAcrossSegment(p,a,b){const dx=b.x-a.x, dy=b.y-a.y, len=dx*dx+dy*dy||1, t=Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/len)), px=a.x+dx*t, py=a.y+dy*t; return {x:2*px-p.x,y:2*py-p.y};}
+function reflectAcrossSymmetryAxis(p){const axis=axisPolylineWorld(); let best=null,bd=Infinity; for(let i=0;i<axis.length-1;i++){const r=reflectAcrossSegment(p,axis[i],axis[i+1]), dx=r.x-p.x, dy=r.y-p.y, d=dx*dx+dy*dy; if(d<bd){bd=d; best=r;}} return best||{x:p.x,y:p.y};}
 function labelZoomScale(){return 1+(Math.max(1,Math.min(12,scale))-1)/11*2;}
 function zoomAt(pos,nextScale){const oldScale=scale, ratio=nextScale/oldScale, cx=canvas.width/2, cy=canvas.height/2; pan.x=(pos.x-cx-(pos.x-cx-pan.x*devicePixelRatio)*ratio)/devicePixelRatio; pan.y=(pos.y-cy-(pos.y-cy-pan.y*devicePixelRatio)*ratio)/devicePixelRatio; scale=nextScale;}
 function pointVisibility(id){const cids=childIdsForPoint(id), hasAny=cids.size>0; if(filter.mode==='all')return {visible:true, alpha:hasAny?0.96:0.82}; if(filter.mode==='unassigned')return {visible:!hasAny, alpha:hasAny?0.03:1}; if(filter.mode==='showChild')return {visible:true, alpha:cids.has(filter.childId)?1:0.08}; if(filter.mode==='soloChild')return {visible:cids.has(filter.childId), alpha:1}; if(filter.mode==='showParent'){const s=childIdsOfParent(filter.parentId), inParent=[...cids].some(cid=>s.has(cid)); return {visible:true, alpha:inParent?1:0.08};} if(filter.mode==='soloParent'){const s=childIdsOfParent(filter.parentId), inParent=[...cids].some(cid=>s.has(cid)); return {visible:inParent, alpha:1};} return {visible:true,alpha:1};}
 function faceVisibility(face){if(filter.mode==='all')return .16; let alphas=face.map(id=>pointVisibility(id)).filter(v=>v.visible).map(v=>v.alpha); if(!alphas.length)return 0; return Math.max(.02, Math.min(.18, Math.max(...alphas)*.16));}
 function drawRotoContours(){if(!isRotoProfile())return; ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round'; for(const c of allChildren()){if(c.ids.length<2)continue; const childFilter=filter.mode==='showChild'||filter.mode==='soloChild', parentFilter=filter.mode==='showParent'||filter.mode==='soloParent'; if(childFilter&&filter.childId!==c.id)continue; if(parentFilter&&filter.parentId!==c.parent.id)continue; const first=toScreen(c.ids[0]); ctx.beginPath(); ctx.moveTo(first[0],first[1]); for(const id of c.ids.slice(1)){const p=toScreen(id); ctx.lineTo(p[0],p[1]);} if(!c.openSpline&&c.ids.length>2)ctx.closePath(); ctx.strokeStyle=c.color||'#7cc7ff'; ctx.globalAlpha=(filter.mode==='all'||filter.mode==='showChild'||filter.mode==='showParent')?.82:1; ctx.lineWidth=(c.id===activeChild?3.2:2.1)*devicePixelRatio; ctx.stroke();} ctx.restore();}
+function drawGridOverlays(){if(!isGridProfile())return; const c=ensureGridProfileRoot(); ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round'; if(showGridSymmetry){ctx.strokeStyle='#ffd079'; ctx.globalAlpha=.9; ctx.lineWidth=2*devicePixelRatio; const axis=GRID_SYMMETRY_AXIS_IDS.map(toScreen); ctx.beginPath(); axis.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.stroke();} const color=c.color||'#7cc7ff', unsetColor='#ff6b6b'; ctx.strokeStyle=color; ctx.fillStyle=color; ctx.globalAlpha=.1; for(let r=0;r<c.grid.rows-1;r++){for(let col=0;col<c.grid.cols-1;col++){const pts=[gridPoint(c,r,col),gridPoint(c,r,col+1),gridPoint(c,r+1,col+1),gridPoint(c,r+1,col)].map(worldToScreen); ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.closePath(); ctx.fill();}} ctx.globalAlpha=.82; ctx.lineWidth=1.6*devicePixelRatio; for(let r=0;r<c.grid.rows;r++){ctx.beginPath(); for(let col=0;col<c.grid.cols;col++){const p=worldToScreen(gridPoint(c,r,col)); col?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]);} ctx.stroke();} for(let col=0;col<c.grid.cols;col++){ctx.beginPath(); for(let r=0;r<c.grid.rows;r++){const p=worldToScreen(gridPoint(c,r,col)); r?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]);} ctx.stroke();} ctx.globalAlpha=1; ctx.font=`${10*devicePixelRatio}px ui-monospace,monospace`; for(const gp of c.grid.points){const p=worldToScreen(gp), active=gridDrag&&gridDrag.index===gridIndex(c,gp.row,gp.col), unset=gp.id==null; ctx.beginPath(); ctx.fillStyle=unset?unsetColor:color; ctx.arc(p[0],p[1],(active?7:5)*devicePixelRatio,0,Math.PI*2); ctx.fill(); ctx.strokeStyle=active?'#ffd079':(unset?'#6b1717':'#10151f'); ctx.lineWidth=1.5*devicePixelRatio; ctx.stroke(); if(gp.id!=null){ctx.fillStyle='#e8edf5'; ctx.fillText(String(gp.id),p[0]+7*devicePixelRatio,p[1]-7*devicePixelRatio);}} ctx.restore();}
 function draw(){ctx.clearRect(0,0,canvas.width,canvas.height); if(!canvas.width)return; if(showMesh){ctx.lineWidth=Math.max(1,devicePixelRatio); for(const f of FACES){const a=faceVisibility(f); if(a<=0)continue; ctx.strokeStyle=`rgba(145,160,185,${a})`; ctx.beginPath(); f.forEach((id,k)=>{const [x,y]=toScreen(id); k?ctx.lineTo(x,y):ctx.moveTo(x,y)}); ctx.closePath(); ctx.stroke();}}
   drawRotoContours();
+  drawGridOverlays();
   for(let i=0;i<MAX_LANDMARKS;i++){const vis=pointVisibility(i); if(!vis.visible)continue; const cid=primaryChildIdForPoint(i), [x,y]=toScreen(i), found=cid?findChild(cid):null; ctx.globalAlpha=vis.alpha; ctx.beginPath(); ctx.fillStyle=cid?(found?.child.color||'#a7afbd'):'#e8edf5'; ctx.arc(x,y,(cid?4.8:(IRIS_IDS.has(i)?4.2:3.3))*devicePixelRatio,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; if(i===hovered||i===selected){ctx.strokeStyle=i===selected?'#e8edf5':'#ffd079';ctx.lineWidth=2*devicePixelRatio;ctx.beginPath();ctx.arc(x,y,9*devicePixelRatio,0,Math.PI*2);ctx.stroke();} if(showLabels||i===hovered||i===selected){const labelScale=labelZoomScale(), labelPad=6*labelScale*devicePixelRatio; ctx.fillStyle='#e8edf5';ctx.font=`${10*labelScale*devicePixelRatio}px ui-monospace,monospace`;ctx.fillText(String(i),x+labelPad,y-labelPad);}}
 }
 function stats(){el('assignedCount').textContent=assigned.size; el('freeCount').textContent=MAX_LANDMARKS-assigned.size;}
 function renderParentSelect(){const s=el('parentSelect'); const val=s.value; s.innerHTML=''; for(const p of parents){const o=document.createElement('option'); o.value=p.id; o.textContent=p.name; s.appendChild(o);} if(parents.some(p=>p.id===val))s.value=val;}
 function setFilter(mode,parentId=null,childId=null){filter={mode,parentId,childId}; renderGroups(); draw();}
-function formatChildIds(c){if(!c.ids.length)return 'none'; return isRotoProfile()?c.ids.map((id,i)=>`${i+1}:${id}`).join(' -> '):c.ids.join(', ');}
-function renderGroups(){renderParentSelect(); const box=el('groups'); box.innerHTML=''; if(!parents.length){box.innerHTML=isRotoProfile()?'<div class="small">No roto contours. Create a parent such as eyes, lips, or face, then add a child such as left_eye_outer. Click landmarks in outline order.</div>':'<div class="small">No parent groups. Create one, for example nose, then add a child such as left_nostril.</div>';return}
+function formatGridPreview(c){ensureGridChild(c); const axis=gridMiniAxisPercent(c).toFixed(2), cells=c.grid.points.map(p=>`<div class="gridMiniCell ${p.id==null?'':'snapped'}" title="r${p.row+1} c${p.col+1}${p.id==null?'':' landmark '+p.id}">${p.id==null?'':p.id}</div>`).join(''); return `<div class="gridExpandWrap"><button class="gridAddButton gridAddTop" data-grid-add="top" title="Add row above"${c.grid.rows>=32?' disabled':''}>+</button><button class="gridAddButton gridAddLeft" data-grid-add="left" title="Add column on FaceMesh left side"${c.grid.cols>=33?' disabled':''}>+</button><div class="gridMini" style="grid-template-columns:repeat(${c.grid.cols},minmax(16px,1fr))"><span class="gridMiniAxis" style="left:${axis}%"></span>${cells}</div><button class="gridAddButton gridAddRight" data-grid-add="right" title="Add column on FaceMesh right side"${c.grid.cols>=33?' disabled':''}>+</button><button class="gridAddButton gridAddBottom" data-grid-add="bottom" title="Add row below"${c.grid.rows>=32?' disabled':''}>+</button></div><div class="gridLegend"><span>FaceMesh axis</span><span>${c.grid.rows} x ${c.grid.cols}</span></div>`;}
+function formatChildIds(c){if(!c.ids.length)return 'none'; if(isGridProfile())return `${c.ids.length} points`; return isRotoProfile()?c.ids.map((id,i)=>`${i+1}:${id}`).join(' -> '):c.ids.join(', ');}
+function renderSingleGrid(){const box=el('groups'), c=ensureGridProfileRoot(), grid=gridStats(c); box.innerHTML=`<div class="gridPanel"><div class="childTitle"><span class="dot" style="background:${c.color}"></span><div class="childName">Grid overlay</div><span class="badge">${grid.snapped}/${grid.total} snapped</span></div><div class="small" style="margin-top:8px">Set a starting size or expand from the mini grid. Drag canvas handles onto landmarks; Symmetry mirrors across the FaceMesh axis. Grid mode is locked to Unwrap.</div><div class="row gridControls"><label class="inlineCheck">Columns<input id="gridCols" type="number" min="2" max="33" step="1" value="${grid.cols}"></label><label class="inlineCheck">Rows<input id="gridRowsInput" type="number" min="2" max="32" value="${grid.rows}"></label></div><div class="actions" style="opacity:1"><button class="primary" data-a="createGrid">Create grid</button><button data-a="clearSnaps">Clear snaps</button><button class="danger" data-a="resetGrid">Reset overlay</button></div><div class="gridMeta"><span class="badge">${grid.cols} cols</span><span class="badge">${grid.rows} rows</span><span class="badge">${grid.quads} complete quads</span></div>${formatGridPreview(c)}</div>`; box.querySelector('[data-a="createGrid"]').onclick=()=>setGridSize(c,box.querySelector('#gridCols').value,box.querySelector('#gridRowsInput').value); box.querySelector('[data-a="clearSnaps"]').onclick=()=>{for(const p of c.grid.points)p.id=null; syncGridAssigned(c); renderGroups();stats();draw();exportJson();}; box.querySelector('[data-a="resetGrid"]').onclick=()=>setGridSize(c,c.grid.cols,c.grid.rows); for(const btn of box.querySelectorAll('[data-grid-add]'))btn.onclick=()=>addGridEdge(c,btn.dataset.gridAdd);}
+function renderGroups(){renderParentSelect(); const box=el('groups'); box.innerHTML=''; if(isGridProfile()){renderSingleGrid(); return;} if(!parents.length){box.innerHTML=isRotoProfile()?'<div class="small">No roto contours. Create a parent such as eyes, lips, or face, then add a child such as left_eye_outer. Click landmarks in outline order.</div>':'<div class="small">No parent groups. Create one, for example nose, then add a child such as left_nostril.</div>';return}
   for(const p of parents){const total=p.children.reduce((s,c)=>s+c.ids.length,0), collapsed=!!p.collapsed; const div=document.createElement('div'); div.className='parent'+(collapsed?' collapsed':''); div.innerHTML=`<div class="parentHead"><button class="toggleParent" data-pa="toggle" title="${collapsed?'Expand':'Collapse'} parent">${collapsed?'+':'-'}</button><div class="parentName">${esc(p.name)}</div><span class="badge">${p.children.length} child</span><span class="badge">${total}</span></div>${collapsed?'':`<div class="childWrap"><div class="parentActions"><button data-pa="add">+ child</button><button data-pa="show" class="${filter.mode==='showParent'&&filter.parentId===p.id?'activeBtn':''}">Show</button><button data-pa="solo" class="${filter.mode==='soloParent'&&filter.parentId===p.id?'activeBtn':''}">Solo</button><button data-pa="rename">Rename</button><button data-pa="delete">Delete parent</button></div><div data-children></div></div>`}`;
     div.querySelector('[data-pa="toggle"]').onclick=()=>{p.collapsed=!p.collapsed;renderGroups();};
     if(collapsed){box.appendChild(div); continue;}
@@ -832,7 +1013,7 @@ function renderGroups(){renderParentSelect(); const box=el('groups'); box.innerH
       if(moveNext)moveNext.onclick=()=>moveSelectedInChild(c,1);
       if(reverse)reverse.onclick=()=>{c.ids.reverse(); renderGroups();draw();exportJson();appToast('Contour order reversed.','ok');};
       cd.querySelector('[data-a="rename"]').onclick=async()=>{const n=await appPrompt('Rename child',c.name); if(n&&n.trim()){c.name=n.trim();renderGroups();exportJson();appToast('Child renamed.','ok');}};
-      cd.querySelector('[data-a="clear"]').onclick=()=>{for(const id of c.ids)removePointFromChild(id,c.id); c.ids=[]; renderGroups();stats();draw();exportJson();};
+      cd.querySelector('[data-a="clear"]').onclick=()=>{for(const id of [...c.ids])removePointFromChild(id,c.id); c.ids=[]; renderGroups();stats();draw();exportJson();};
       cd.querySelector('[data-a="delete"]').onclick=async()=>{if(await appConfirm('Delete this child group? Shared points remain in other groups.','Delete child','Delete',true)){for(const id of c.ids)removePointFromChild(id,c.id); p.children=p.children.filter(x=>x.id!==c.id); if(activeChild===c.id)activeChild=allChildren()[0]?.id||null; renderGroups();stats();draw();exportJson();appToast('Child deleted.','ok');}};
       cb.appendChild(cd);
     }
@@ -840,21 +1021,24 @@ function renderGroups(){renderParentSelect(); const box=el('groups'); box.innerH
   }
 }
 function addParent(name){name=(name||el('parentName').value).trim(); if(!name){appToast('Enter a parent group name.','error');return null} if(parents.some(p=>p.name===name)){appToast('That parent already exists.','error');return parents.find(p=>p.name===name)} const p={id:uid('p'),name,children:[],collapsed:false}; parents.push(p); el('parentName').value=''; renderGroups(); exportJson(); appToast('Parent created.','ok'); return p;}
-function addChild(parentId,name,color){parentId=parentId||el('parentSelect').value; const p=parents.find(x=>x.id===parentId); if(!p){appToast('Create a parent first.','error');return null} name=(name||el('childName').value).trim(); if(!name){appToast('Enter a child group name.','error');return null} if(p.children.some(c=>c.name===name)){appToast('That child already exists in this parent.','error');return p.children.find(c=>c.name===name)} const c={id:uid('c'),name,color:color||el('childColor').value||COLORS[allChildren().length%COLORS.length],ids:[],openSpline:false}; p.collapsed=false; p.children.push(c); activeChild=c.id; el('childName').value=''; el('childColor').value=COLORS[(allChildren().length+1)%COLORS.length]; renderGroups();stats();draw();exportJson(); appToast('Child created.','ok'); return c;}
+function makeChild(name,color){const c={id:uid('c'),name,color:color||COLORS[allChildren().length%COLORS.length],ids:[],openSpline:false}; if(isGridProfile())createGrid(c,3,2); return c;}
+function addChild(parentId,name,color){parentId=parentId||el('parentSelect').value; const p=parents.find(x=>x.id===parentId); if(!p){appToast('Create a parent first.','error');return null} name=(name||el('childName').value).trim(); if(!name){appToast('Enter a child group name.','error');return null} if(p.children.some(c=>c.name===name)){appToast('That child already exists in this parent.','error');return p.children.find(c=>c.name===name)} const c=makeChild(name,color||el('childColor').value||COLORS[allChildren().length%COLORS.length]); p.collapsed=false; p.children.push(c); activeChild=c.id; el('childName').value=''; el('childColor').value=COLORS[(allChildren().length+1)%COLORS.length]; renderGroups();stats();draw();exportJson(); appToast('Child created.','ok'); return c;}
 function getOrCreateParent(name){let p=parents.find(x=>x.name===name); if(!p){p={id:uid('p'),name,children:[],collapsed:false}; parents.push(p);} return p;}
-function getOrCreateChild(parentName,childName,color){const p=getOrCreateParent(parentName); let c=p.children.find(x=>x.name===childName); if(!c){c={id:uid('c'),name:childName,color:color||COLORS[allChildren().length%COLORS.length],ids:[],openSpline:false}; p.children.push(c);} return c;}
+function getOrCreateChild(parentName,childName,color){const p=getOrCreateParent(parentName); let c=p.children.find(x=>x.name===childName); if(!c){c=makeChild(childName,color||COLORS[allChildren().length%COLORS.length]); p.children.push(c);} return c;}
 function moveSelectedInChild(c,delta){if(selected==null){appToast('Select a landmark first.','error');return} const idx=c.ids.indexOf(selected); if(idx<0){appToast('Selected landmark is not in this contour.','error');return} const next=idx+delta; if(next<0||next>=c.ids.length)return; [c.ids[idx],c.ids[next]]=[c.ids[next],c.ids[idx]]; renderGroups();draw();exportJson();}
 function orderIds(ids){return isRotoProfile()?[...new Set(ids)]:[...new Set(ids)].sort((a,b)=>a-b)}
-function assign(id,cid=activeChild){if(!cid||id<0||id>=MAX_LANDMARKS)return false; const found=findChild(cid); if(!found||found.child.ids.includes(id))return false; if(!assigned.has(id))assigned.set(id,new Set()); assigned.get(id).add(cid); found.child.ids.push(id); found.child.ids=orderIds(found.child.ids); renderGroups();stats();draw();exportJson();return true;}
+function assign(id,cid=activeChild){if(isGridProfile())return false; if(!cid||id<0||id>=MAX_LANDMARKS)return false; const found=findChild(cid); if(!found||found.child.ids.includes(id))return false; if(!assigned.has(id))assigned.set(id,new Set()); assigned.get(id).add(cid); found.child.ids.push(id); found.child.ids=orderIds(found.child.ids); renderGroups();stats();draw();exportJson();return true;}
 function unassign(id,cid=activeChild){if(cid&&pointHasChild(id,cid)){removePointFromChild(id,cid);} else {for(const childId of [...childIdsForPoint(id)])removePointFromChild(id,childId);} renderGroups();stats();draw();exportJson();}
 function addIdsToChild(c,ids){for(const n of ids){const id=Number(n); if(Number.isInteger(id)&&id>=0&&id<MAX_LANDMARKS&&!c.ids.includes(id)){if(!assigned.has(id))assigned.set(id,new Set()); assigned.get(id).add(c.id); c.ids.push(id);}} c.ids=orderIds(c.ids); if(!activeChild)activeChild=c.id;}
 function loadDefaultGroups(){const map={lips:['mouth','lips'],nose:['nose','all'],left_eye:['eyes','left_eye'],right_eye:['eyes','right_eye'],left_iris:['eyes','left_iris'],right_iris:['eyes','right_iris'],left_eyebrow:['eyebrows','left_eyebrow'],right_eyebrow:['eyebrows','right_eyebrow'],face_oval:['face','oval']}; let i=0; for(const [key,ids] of Object.entries(DEFAULT_GROUPS_478)){const [pname,cname]=map[key]||['default',key]; const c=getOrCreateChild(pname,cname,COLORS[i++%COLORS.length]); addIdsToChild(c,ids);} renderGroups();stats();draw();exportJson();}
 function parseIds(txt){const out=[]; for(const part of txt.split(/[ ,;\n]+/).filter(Boolean)){if(/^\d+-\d+$/.test(part)){let [a,b]=part.split('-').map(Number); if(a>b)[a,b]=[b,a]; for(let i=a;i<=b;i++)out.push(i)} else if(/^\d+$/.test(part))out.push(Number(part));} return [...new Set(out)].filter(i=>i>=0&&i<MAX_LANDMARKS);}
 function buildNested(parentList=parents,profileName=currentProfile){const root={}; for(const p of parentList){root[p.name]={}; for(const c of p.children){if(isRotoProfile(profileName)){root[p.name][c.name]={ids:[...c.ids],openSpline:!!c.openSpline};} else {root[p.name][c.name]=[...c.ids].sort((a,b)=>a-b);}}} return root;}
-function buildProfileExport(){saveProfileState(); const root={profiles:{}}; for(const name of PROFILE_NAMES)root.profiles[name]=buildNested(profiles[name].parents,name); return root;}
+function buildGridExport(){const c=profiles.grid.parents[0]?.children[0]; if(!c)return {cols:3,rows:2,points:[],ids:[],quads:[],symmetryAxis:GRID_SYMMETRY_AXIS_IDS}; ensureGridChild(c); return {cols:c.grid.cols,rows:c.grid.rows,points:c.grid.points.map(p=>({row:p.row,col:p.col,id:p.id??null,x:p.x,y:p.y})),ids:gridIdsMatrix(c),quads:gridCompleteQuads(c),symmetryAxis:GRID_SYMMETRY_AXIS_IDS};}
+function buildProfileExport(){saveProfileState(); if(isGridProfile())ensureGridProfileRoot(); const root={profiles:{}}; for(const name of PROFILE_NAMES)root.profiles[name]=isGridProfile(name)?buildGridExport():buildNested(profiles[name].parents,name); return root;}
 function isProfileExport(data){return data&&typeof data==='object'&&!Array.isArray(data)&&data.profiles&&typeof data.profiles==='object'&&!Array.isArray(data.profiles);}
 function exportJson(){const data=buildProfileExport(); el('jsonBox').value=JSON.stringify(data,null,2); validateMappingObject(data); return data;}
-function flattenForImport(obj){const items=[]; function addLeaf(path,ids,meta={}){if(path.length===1)items.push([path[0],'all',ids,meta]); else items.push([path.slice(0,-1).join('.'),path[path.length-1],ids,meta]);} function walk(node,path){if(Array.isArray(node)){addLeaf(path,node); return;} if(node&&typeof node==='object'&&Array.isArray(node.ids)){addLeaf(path,node.ids,{openSpline:!!node.openSpline}); return;} if(node&&typeof node==='object'){for(const [k,v] of Object.entries(node))walk(v,path.concat(k));}}
+function gridIdsForImport(node){if(!node||typeof node!=='object')return []; if(Array.isArray(node.points))return node.points.map(p=>Number(p.id)).filter(Number.isInteger); if(Array.isArray(node.ids))return node.ids.flat?node.ids.flat(Infinity).map(Number).filter(Number.isInteger):[]; return [];}
+function flattenForImport(obj){const items=[]; function addLeaf(path,ids,meta={}){if(path.length===0)items.push(['grid','grid',ids,meta]); else if(path.length===1)items.push([path[0],'all',ids,meta]); else items.push([path.slice(0,-1).join('.'),path[path.length-1],ids,meta]);} function walk(node,path){if(Array.isArray(node)){addLeaf(path,node); return;} if(node&&typeof node==='object'&&Number.isInteger(Number(node.cols))&&Number.isInteger(Number(node.rows))){addLeaf(path,gridIdsForImport(node),{}); return;} if(node&&typeof node==='object'&&Array.isArray(node.ids)){addLeaf(path,node.ids,{openSpline:!!node.openSpline}); return;} if(node&&typeof node==='object'){for(const [k,v] of Object.entries(node))walk(v,path.concat(k));}}
   walk(obj,[]); return items;}
 function validateProfileMapping(data,label){const seen=new Map(), shared=[], invalid=[]; let total=0; for(const [pname,cname,ids] of flattenForImport(data)){const path=`${pname}.${cname}`; if(!Array.isArray(ids)){invalid.push(`${path}: not an array`); continue;} for(const raw of ids){const id=Number(raw); if(!Number.isInteger(id)||id<0||id>=MAX_LANDMARKS){invalid.push(`${path}: ${raw}`); continue;} total++; if(seen.has(id)){shared.push(`${id}: ${seen.get(id)} + ${path}`);} else seen.set(id,path);}}
   const lines=[`Profile: ${label}`,`Unique IDs: ${seen.size}`,`Total entries: ${total}`,`Free IDs: ${MAX_LANDMARKS-seen.size}`];
@@ -867,14 +1051,17 @@ function validateMappingObject(data){const mappings=isProfileExport(data)?data.p
   return {sharedCount, invalidCount};
 }
 function validateJsonBox(){let data; try{data=JSON.parse(el('jsonBox').value)}catch(e){el('validationBox').textContent='Invalid JSON: '+e.message; return null;} return validateMappingObject(data);}
-function replaceProfileFromMapping(name,mapping){const previous={currentProfile,parents,assigned,activeChild}; profiles[name]=emptyProfile(); currentProfile=name; parents=profiles[name].parents; assigned=profiles[name].assigned; activeChild=null; let i=0; for(const [pname,cname,ids,meta] of flattenForImport(mapping||{})){const c=getOrCreateChild(pname,cname,COLORS[i++%COLORS.length]); if(isRotoProfile(name))c.openSpline=!!meta.openSpline; addIdsToChild(c,ids);} saveProfileState(); currentProfile=previous.currentProfile; if(previous.currentProfile===name){parents=profiles[name].parents; assigned=profiles[name].assigned; activeChild=profiles[name].activeChild;} else {parents=previous.parents; assigned=previous.assigned; activeChild=previous.activeChild;}}
-async function importJson(){let data; try{data=JSON.parse(el('jsonBox').value)}catch(e){appToast('Invalid JSON.','error');return} const report=validateMappingObject(data); if(report.invalidCount&&!(await appConfirm('JSON contains invalid IDs. Import will skip out-of-range points. Continue?','Import JSON','Import',true)))return; const keepProfile=currentProfile; if(isProfileExport(data)){for(const name of PROFILE_NAMES)replaceProfileFromMapping(name,data.profiles[name]||{}); currentProfile=PROFILE_NAMES.includes(keepProfile)?keepProfile:'full';} else {replaceProfileFromMapping(currentProfile,data);} parents=profiles[currentProfile].parents; assigned=profiles[currentProfile].assigned; activeChild=profiles[currentProfile].activeChild; el('profileSelect').value=currentProfile; updateProfileHint(); renderGroups();stats();draw();exportJson(); appToast('JSON imported.','ok');}
-function loadInitialProfiles(){for(const name of PROFILE_NAMES)replaceProfileFromMapping(name,INITIAL_PROFILE_EXPORT.profiles[name]||{}); currentProfile='roto'; parents=profiles.roto.parents; assigned=profiles.roto.assigned; activeChild=profiles.roto.activeChild; selected=null; hovered=null; filter={mode:'all',parentId:null,childId:null}; const ps=el('profileSelect'); if(ps)ps.value=currentProfile; updateProfileHint(); renderGroups();stats();draw();exportJson();}
-canvas.addEventListener('mousemove',e=>{if(dragMode){const dx=e.clientX-last.x,dy=e.clientY-last.y; if(Math.hypot(dx,dy)>1)moved=true; if(dragMode==='rotate'){freeRot.yaw+=dx*.005; freeRot.pitch=Math.max(-Math.PI*.49,Math.min(Math.PI*.49,freeRot.pitch+dy*.005));} else {pan.x+=dx; pan.y+=dy;} last={x:e.clientX,y:e.clientY}; draw(); return;} const pos=fromEvent(e); hovered=nearest(pos); if(hovered==null)el('info').textContent='Hover a point'; else {const memberships=[...childIdsForPoint(hovered)].map(cid=>findChild(cid)).filter(Boolean), v=landmarkPoint(hovered), virtual=IRIS_IDS.has(hovered)?'<br>virtual iris point':'', memberHtml=memberships.length?memberships.map(x=>`<br>${esc(x.parent.name)}: <span style="color:${x.child.color||'#e8edf5'}">${esc(x.child.name)}</span>`).join(''):'free'; el('info').innerHTML=`<b>ID ${hovered}</b>${virtual}<br>x ${v[0].toFixed(3)}<br>y ${v[1].toFixed(3)}<br>z ${v[2].toFixed(3)}<br>${memberHtml}`;} draw();});
-canvas.addEventListener('mousedown',e=>{moved=false;last={x:e.clientX,y:e.clientY}; dragMode=(viewMode==='free3d'&&e.button===0&&!e.shiftKey)?'rotate':'pan';});
+function importGridMapping(mapping){const c=getOrCreateChild('grid','grid',COLORS[0]), cols=normalizeGridCols(mapping?.cols), rows=normalizeGridRows(mapping?.rows); createGrid(c,cols,rows); if(Array.isArray(mapping?.points)){for(const item of mapping.points){const row=Number(item.row), col=Number(item.col); if(!Number.isInteger(row)||!Number.isInteger(col)||row<0||row>=c.grid.rows||col<0||col>=c.grid.cols)continue; const p=gridPoint(c,row,col); p.x=Number(item.x)||p.x; p.y=Number(item.y)||p.y; const id=Number(item.id); if(Number.isInteger(id)&&id>=0&&id<MAX_LANDMARKS){p.id=id; p.x=UNWRAP_LAYOUT[id][0]; p.y=UNWRAP_LAYOUT[id][1];}}} else if(Array.isArray(mapping?.ids)){const ids=mapping.ids; for(let r=0;r<Math.min(c.grid.rows,ids.length);r++){const row=Array.isArray(ids[r])?ids[r]:[]; for(let col=0;col<Math.min(c.grid.cols,row.length);col++){const id=Number(row[col]); if(Number.isInteger(id)&&id>=0&&id<MAX_LANDMARKS)snapGridPointToWorld(gridPoint(c,r,col),{x:UNWRAP_LAYOUT[id][0],y:UNWRAP_LAYOUT[id][1]});}}} syncGridAssigned(c); activeChild=c.id;}
+function replaceProfileFromMapping(name,mapping){const previous={currentProfile,parents,assigned,activeChild}; profiles[name]=emptyProfile(); currentProfile=name; parents=profiles[name].parents; assigned=profiles[name].assigned; activeChild=null; if(isGridProfile(name)){importGridMapping(mapping||{});} else {let i=0; for(const [pname,cname,ids,meta] of flattenForImport(mapping||{})){const c=getOrCreateChild(pname,cname,COLORS[i++%COLORS.length]); if(isRotoProfile(name))c.openSpline=!!meta.openSpline; addIdsToChild(c,ids);}} saveProfileState(); currentProfile=previous.currentProfile; if(previous.currentProfile===name){parents=profiles[name].parents; assigned=profiles[name].assigned; activeChild=profiles[name].activeChild;} else {parents=previous.parents; assigned=previous.assigned; activeChild=previous.activeChild;}}
+async function importJson(){let data; try{data=JSON.parse(el('jsonBox').value)}catch(e){appToast('Invalid JSON.','error');return} const report=validateMappingObject(data); if(report.invalidCount&&!(await appConfirm('JSON contains invalid IDs. Import will skip out-of-range points. Continue?','Import JSON','Import',true)))return; const keepProfile=currentProfile; if(isProfileExport(data)){for(const name of PROFILE_NAMES)replaceProfileFromMapping(name,data.profiles[name]||{}); currentProfile=PROFILE_NAMES.includes(keepProfile)?keepProfile:'full';} else {replaceProfileFromMapping(currentProfile,data);} parents=profiles[currentProfile].parents; assigned=profiles[currentProfile].assigned; activeChild=profiles[currentProfile].activeChild; ensureGridProfileRoot(); el('profileSelect').value=currentProfile; updateProfileHint(); updateProfileUi(); renderGroups();stats();draw();exportJson(); appToast('JSON imported.','ok');}
+function loadInitialProfiles(){for(const name of PROFILE_NAMES)replaceProfileFromMapping(name,INITIAL_PROFILE_EXPORT.profiles[name]||{}); currentProfile='roto'; parents=profiles.roto.parents; assigned=profiles.roto.assigned; activeChild=profiles.roto.activeChild; selected=null; hovered=null; filter={mode:'all',parentId:null,childId:null}; const ps=el('profileSelect'); if(ps)ps.value=currentProfile; updateProfileHint(); updateProfileUi(); renderGroups();stats();draw();exportJson();}
+function gridHitTest(pos){if(!isGridProfile())return null; const c=ensureGridProfileRoot(); let best=null,bd=Infinity; for(let i=0;i<c.grid.points.length;i++){const p=worldToScreen(c.grid.points[i]), d=Math.hypot(p[0]-pos.x,p[1]-pos.y); if(d<bd){bd=d; best=i;}} return bd<=12*devicePixelRatio?{child:c,index:best}:null;}
+function applyGridDrag(pos){if(!gridDrag)return; const c=gridDrag.child, point=c.grid.points[gridDrag.index], world=screenToWorld(pos); snapGridPointToWorld(point,world); if(showGridSymmetry){const mirrorCol=c.grid.cols-1-point.col; if(mirrorCol!==point.col){const mirror=gridPoint(c,point.row,mirrorCol), reflected=reflectAcrossSymmetryAxis({x:point.x,y:point.y}); snapGridPointToWorld(mirror,reflected);}} syncGridAssigned(c); renderGroups();stats();draw();exportJson();}
+canvas.addEventListener('mousemove',e=>{const pos=fromEvent(e); if(gridDrag){moved=true; applyGridDrag(pos); return;} if(dragMode){const dx=e.clientX-last.x,dy=e.clientY-last.y; if(Math.hypot(dx,dy)>1)moved=true; if(dragMode==='rotate'){freeRot.yaw+=dx*.005; freeRot.pitch=Math.max(-Math.PI*.49,Math.min(Math.PI*.49,freeRot.pitch+dy*.005));} else {pan.x+=dx; pan.y+=dy;} last={x:e.clientX,y:e.clientY}; draw(); return;} const hit=gridHitTest(pos); if(hit){const p=hit.child.grid.points[hit.index]; el('info').innerHTML=`<b>Grid r${p.row+1} c${p.col+1}</b><br>${p.id==null?'not snapped':'landmark '+p.id}`; canvas.style.cursor='grab'; draw(); return;} canvas.style.cursor='crosshair'; hovered=nearest(pos); if(hovered==null)el('info').textContent='Hover a point'; else {const memberships=[...childIdsForPoint(hovered)].map(cid=>findChild(cid)).filter(Boolean), v=landmarkPoint(hovered), virtual=IRIS_IDS.has(hovered)?'<br>virtual iris point':'', memberHtml=memberships.length?memberships.map(x=>`<br>${esc(x.parent.name)}: <span style="color:${x.child.color||'#e8edf5'}">${esc(x.child.name)}</span>`).join(''):'free'; el('info').innerHTML=`<b>ID ${hovered}</b>${virtual}<br>x ${v[0].toFixed(3)}<br>y ${v[1].toFixed(3)}<br>z ${v[2].toFixed(3)}<br>${memberHtml}`;} draw();});
+canvas.addEventListener('mousedown',e=>{moved=false;last={x:e.clientX,y:e.clientY}; const hit=gridHitTest(fromEvent(e)); if(hit){gridDrag=hit; canvas.style.cursor='grabbing'; applyGridDrag(fromEvent(e)); return;} dragMode=(viewMode==='free3d'&&e.button===0&&!e.shiftKey)?'rotate':'pan';});
 canvas.addEventListener('contextmenu',e=>e.preventDefault());
-window.addEventListener('mouseup',()=>{dragMode=null;});
-canvas.addEventListener('click',e=>{if(moved)return; const id=nearest(fromEvent(e)); if(id==null)return; selected=id; if(e.altKey){unassign(id);return} if(!activeChild){appToast('Create or select a child group first.','error');return} if(!assign(id))draw();});
+window.addEventListener('mouseup',()=>{dragMode=null; gridDrag=null; canvas.style.cursor='crosshair';});
+canvas.addEventListener('click',e=>{if(isGridProfile())return; if(moved)return; const id=nearest(fromEvent(e)); if(id==null)return; selected=id; if(e.altKey){unassign(id);return} if(!activeChild){appToast('Create or select a child group first.','error');return} if(!assign(id))draw();});
 canvas.addEventListener('wheel',e=>{e.preventDefault(); const nextScale=Math.max(.2,Math.min(12,scale*(e.deltaY<0?1.1:.9))); if(nextScale!==scale)zoomAt(fromEvent(e),nextScale); draw();},{passive:false});
 el('addParent').onclick=()=>addParent(); el('parentName').addEventListener('keydown',e=>{if(e.key==='Enter')addParent();});
 el('addChild').onclick=()=>addChild(); el('childName').addEventListener('keydown',e=>{if(e.key==='Enter')addChild();});
@@ -882,7 +1069,7 @@ el('addManual').onclick=()=>{if(!activeChild){appToast('Select a child group fir
 el('profileSelect').onchange=e=>useProfile(e.target.value);
 el('exportBtn').onclick=exportJson; el('validateBtn').onclick=validateJsonBox; el('importBtn').onclick=importJson; el('downloadBtn').onclick=()=>{const blob=new Blob([JSON.stringify(exportJson(),null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='mediapipe_landmark_profiles.json'; a.click(); URL.revokeObjectURL(a.href);};
 el('clearAll').onclick=async()=>{if(await appConfirm('Clear current profile?','Clear profile','Clear',true)){resetCurrentProfile();renderGroups();stats();draw();exportJson();appToast('Profile cleared.','ok');}};
-el('resetView').onclick=()=>{scale=1;pan={x:0,y:0};freeRot={yaw:0,pitch:0};draw();}; el('toggleMesh').onclick=e=>{showMesh=!showMesh;e.target.textContent='Mesh: '+(showMesh?'ON':'OFF');draw();}; el('toggleLabels').onclick=e=>{showLabels=!showLabels;e.target.textContent='ID: '+(showLabels?'ON':'OFF');draw();}; el('showAll').onclick=()=>setFilter('all'); el('showUnassigned').onclick=()=>setFilter('unassigned'); el('unassignSelected').onclick=()=>{if(selected!=null)unassign(selected);}; el('viewMode').onchange=e=>{viewMode=e.target.value;scale=1;pan={x:0,y:0};updateViewControls();draw();};
+el('resetView').onclick=()=>{scale=1;pan={x:0,y:0};freeRot={yaw:0,pitch:0};draw();}; el('toggleMesh').onclick=e=>{showMesh=!showMesh;e.target.textContent='Mesh: '+(showMesh?'ON':'OFF');draw();}; el('toggleLabels').onclick=e=>{showLabels=!showLabels;e.target.textContent='ID: '+(showLabels?'ON':'OFF');draw();}; el('toggleGridSymmetry').onclick=()=>{showGridSymmetry=!showGridSymmetry;updateViewControls();draw();}; el('showAll').onclick=()=>setFilter('all'); el('showUnassigned').onclick=()=>setFilter('unassigned'); el('unassignSelected').onclick=()=>{if(selected!=null)unassign(selected);}; el('viewMode').onchange=e=>{viewMode=isGridProfile()?'unwrap':e.target.value; if(isGridProfile())e.target.value='unwrap'; scale=1;pan={x:0,y:0};updateViewControls();draw();};
 el('unwrapStrength').oninput=e=>setUnwrapStrength(e.target.value);
 el('unwrapStrength').onchange=e=>setUnwrapStrength(e.target.value,true);
 initPanelControls(); updateUnwrapStrengthUi(); updateViewControls(); updateProfileHint(); applyUiState(); resize(); loadInitialProfiles();
