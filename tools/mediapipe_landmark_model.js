@@ -8,8 +8,8 @@ function isGridProfile(name=currentProfile){return name==='grid'}
 function resetSelection(){selected=null; hovered=null; filter={mode:'all',parentId:null,childId:null};}
 function saveProfileState(){profiles[currentProfile].parents=parents; profiles[currentProfile].assigned=assigned; profiles[currentProfile].activeChild=activeChild}
 function useProfile(name){saveProfileState(); currentProfile=PROFILE_NAMES.includes(name)?name:'full'; const state=profiles[currentProfile]; parents=state.parents; assigned=state.assigned; activeChild=state.activeChild; resetSelection(); updateProfileHint(); updateProfileUi(); ensureGridProfileRoot(); refresh();}
-function resetCurrentProfile(){parents=[]; assigned=new Map(); activeChild=null; profiles[currentProfile]= {parents,assigned,activeChild}; resetSelection(); ensureGridProfileRoot();}
-function resetAllProfiles(){for(const name of PROFILE_NAMES)profiles[name]=emptyProfile(); currentProfile='full'; parents=profiles.full.parents; assigned=profiles.full.assigned; activeChild=null; resetSelection(); const ps=el('profileSelect'); if(ps)ps.value=currentProfile; updateProfileHint(); updateProfileUi();}
+function resetCurrentProfile(){parents=[]; assigned=new Map(); activeChild=null; profiles[currentProfile]= {parents,assigned,activeChild}; selected=null; filter={mode:'all',parentId:null,childId:null}; ensureGridProfileRoot();}
+function resetAllProfiles(){for(const name of PROFILE_NAMES)profiles[name]=emptyProfile(); currentProfile='full'; parents=profiles.full.parents; assigned=profiles.full.assigned; activeChild=null; selected=null; filter={mode:'all',parentId:null,childId:null}; const ps=el('profileSelect'); if(ps)ps.value=currentProfile; updateProfileHint(); updateProfileUi();}
 function allChildren(){return parents.flatMap(p=>p.children.map(c=>({...c,parent:p})))}
 function findChild(id){for(const p of parents){const c=p.children.find(x=>x.id===id); if(c)return {parent:p,child:c};} return null}
 function childIdsOfParent(pid){const p=parents.find(x=>x.id===pid); return new Set((p?.children||[]).map(c=>c.id))}
