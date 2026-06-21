@@ -22,6 +22,8 @@
   --control-pad-x:7px;
   --left-panel-width:300px;
   --right-panel-width:300px;
+  /* Grid edge colors. Mirror GRID_EDGE_COLORS in view.js (canvas can't read CSS
+     custom properties cheaply); keep both sets in sync. */
   --c-edge-top:#ffbf4d;
   --c-edge-bottom:#b48cff;
   --c-edge-left:#58d68d;
