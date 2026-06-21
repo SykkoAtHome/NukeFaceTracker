@@ -758,7 +758,7 @@ class TestTrackerRefinement(unittest.TestCase):
         self.assertEqual(appended_points[0].center.curves[1].keys, [(1, 200.0), (3, 220.0)])
 
     def test_generate_roto_node_open_mapping_contour_skips_closed_tangents(self):
-        """Contours marked openSpline in the mapping avoid closed-shape tangents."""
+        """Contours marked openSpline are emitted as native open Roto splines."""
         import json
 
         mock_parent = MagicMock()
@@ -778,26 +778,39 @@ class TestTrackerRefinement(unittest.TestCase):
         mock_rp = MagicMock()
         sys.modules['nuke.rotopaint'] = mock_rp
         mock_nuke.rotopaint = mock_rp
-        mock_rp.AnimControlPoint.side_effect = lambda x, y: TestTrackerRefinement._FakeControlPoint()
 
-        appended_points = []
         mock_shape = MagicMock()
-        mock_shape.append.side_effect = lambda item: appended_points.append(item)
-        mock_shape.__getitem__.side_effect = lambda idx: appended_points[idx]
-        mock_rp.Shape.return_value = mock_shape
-
+        mock_shape.name = "roto_face_symmetry_axis"
+        mock_shape.__getitem__.side_effect = [
+            TestTrackerRefinement._FakeControlPoint(),
+            TestTrackerRefinement._FakeControlPoint(),
+            TestTrackerRefinement._FakeControlPoint(),
+        ]
+        mock_curves = MagicMock()
+        mock_curves.rootLayer = [mock_shape]
+        mock_open_roto = MagicMock()
+        mock_open_roto.__getitem__.side_effect = lambda key: mock_curves if key == "curves" else MagicMock()
         mock_nuke.allNodes.return_value = []
-        mock_nuke.createNode.return_value = MagicMock()
+        mock_nuke.nodePaste.return_value = mock_open_roto
+
+        open_script = nuke_tracker._build_open_roto_node_script(
+            dummy_roto_data,
+            "Roto_Open_FaceTrackerRoto",
+            1920,
+            1080,
+        )
 
         with patch("os.path.exists", return_value=True), \
              patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(dummy_roto_data))):
             success = nuke_tracker.generate_roto_node(mock_parent, "dummy_roto.json", 1920, 1080)
 
         self.assertTrue(success)
-        self.assertEqual(len(appended_points), 3)
-        for cp in appended_points:
-            self.assertEqual(cp.leftTangent.curves[0].keys, [])
-            self.assertEqual(cp.rightTangent.curves[0].keys, [])
+        self.assertIn("curvegroup roto_face_symmetry_axis 1049088 bezier", open_script)
+        self.assertIn("{f 1056800}", open_script)
+        self.assertIn("Roto_Open_FaceTrackerRoto", open_script)
+        mock_rp.Shape.assert_not_called()
+        mock_nuke.createNode.assert_not_called()
+        mock_nuke.nodePaste.assert_called_once()
 
     def test_generate_tracker_node_expands_dense_contour_groups(self):
         """Dense tracker export expands grouped contour JSON into one Tracker4 track per point."""

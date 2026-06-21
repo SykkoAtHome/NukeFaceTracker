@@ -2241,8 +2241,169 @@ def _calculate_closed_bezier_tangent(points, idx, tension=0.25):
     )
 
 
+def _set_roto_shape_closed_state(shape, is_closed, frame=None, contour_name=""):
+    desired_closed_value = 1.0 if is_closed else 0.0
+    state_set = False
+    errors = []
+
+    try:
+        import _curvelib
+        attrs = shape.getAttributes()
+        for attr_frame in (0, frame):
+            if attr_frame is not None:
+                attrs.set(int(attr_frame), _curvelib.AnimAttributes.kClosedAttribute, desired_closed_value)
+        state_set = True
+    except Exception as e:
+        errors.append(str(e))
+
+    try:
+        # eOpenFlag True means the shape is open.
+        shape.setFlag(nuke.rotopaint.FlagType.eOpenFlag, not is_closed)
+        state_set = True
+    except Exception as e:
+        errors.append(str(e))
+
+    if not state_set:
+        print(
+            f"[NukeFaceTracker] WARNING: Could not set open/closed state "
+            f"for contour '{contour_name}' (is_closed={is_closed}): "
+            f"{'; '.join(errors)}"
+        )
+    return state_set
+
+
+def _nuke_hex_float(value):
+    import struct
+    return "x" + struct.pack(">f", float(value)).hex()
+
+
+def _build_open_roto_point_script(x_value, y_value):
+    return "\n".join([
+        "        {0 0}",
+        "        {{a osw",
+        "       {{0 1}}\t osf",
+        "       {{0 0}}}     " + _nuke_hex_float(x_value) + " " + _nuke_hex_float(y_value) + "}",
+        "        {0 0}",
+    ])
+
+
+def _build_open_roto_curvegroup_script(name, points):
+    center_x = sum(point[0] for point in points) / len(points)
+    center_y = sum(point[1] for point in points) / len(points)
+    point_lines = []
+    for point in points:
+        point_lines.append(_build_open_roto_point_script(point[0], point[1]))
+    points_script = "\n".join(point_lines)
+    return "\n".join([
+        "    {curvegroup " + _safe_nuke_node_name(name) + " 1049088 bezier",
+        "     {{cc",
+        "       {f 1056800}",
+        "       {px 0",
+        points_script + "}}     idem}",
+        "     {tx 0 " + _nuke_hex_float(center_x) + " " + _nuke_hex_float(center_y) + "}",
+        "     {a osbe 0 osee 0 osw x41200000 osf 0 str 1 ltn 0 ltm 0 tt x41200000}}}}}}",
+    ])
+
+
+def _build_open_roto_node_script(open_contours, node_name, width, height):
+    curvegroups = []
+    for group_name, frame_data in open_contours.items():
+        first_frame = min(int(frame) for frame in frame_data.keys())
+        first_points = frame_data[str(first_frame)]
+        curvegroups.append(_build_open_roto_curvegroup_script(group_name, first_points))
+
+    layer_attrs = (
+        "{a pt1x 0 pt1y 0 pt2x 0 pt2y 0 pt3x 0 pt3y 0 pt4x 0 pt4y 0 "
+        "ptex00 0 ptex01 0 ptex02 0 ptex03 0 ptex10 0 ptex11 0 ptex12 0 ptex13 0 "
+        "ptex20 0 ptex21 0 ptex22 0 ptex23 0 ptex30 0 ptex31 0 ptex32 0 ptex33 0 "
+        "ptof1x 0 ptof1y 0 ptof2x 0 ptof2y 0 ptof3x 0 ptof3y 0 ptof4x 0 ptof4y 0 "
+        "pterr 0 ptrefset 0 ptmot x40800000 ptref 0}"
+    )
+    return "\n".join([
+        "Roto {",
+        " output alpha",
+        " curves {{{v x3f99999a}",
+        "  {f 0}",
+        "  {n",
+        "   {layer Root",
+        "    {f 2097152}",
+        "    {t " + _nuke_hex_float(width / 2.0) + " " + _nuke_hex_float(height / 2.0) + "}",
+        "    " + layer_attrs,
+        "\n".join(curvegroups),
+        " name " + _safe_nuke_node_name(node_name),
+        "}",
+        "",
+    ])
+
+
+def _iter_roto_layer_items(layer):
+    try:
+        for item in layer:
+            yield item
+        return
+    except Exception:
+        pass
+
+    try:
+        count = len(layer)
+    except Exception:
+        count = 0
+    for index in range(count):
+        try:
+            yield layer[index]
+        except Exception:
+            pass
+
+
+def _find_roto_shape_by_name(layer, name):
+    for item in _iter_roto_layer_items(layer):
+        try:
+            if getattr(item, "name", None) == name:
+                return item
+        except Exception:
+            pass
+    return None
+
+
+def _animate_pasted_open_roto_contours(roto_node, open_contours):
+    try:
+        curves_knob = roto_node["curves"]
+        root_layer = curves_knob.rootLayer
+    except Exception:
+        return
+
+    for group_name, frame_data in open_contours.items():
+        shape = _find_roto_shape_by_name(root_layer, group_name)
+        if shape is None:
+            continue
+        sorted_frames = sorted(int(frame) for frame in frame_data.keys())
+        num_points = len(frame_data[str(sorted_frames[0])])
+        for frame in sorted_frames:
+            points = frame_data[str(frame)]
+            if len(points) != num_points:
+                continue
+            for idx, coords in enumerate(points):
+                try:
+                    shape_point = shape[idx]
+                except Exception:
+                    continue
+                _add_position_key(shape_point.center, frame, coords[0], coords[1])
+
+                feather_center = _get_keyable_anim_point(
+                    shape_point,
+                    ("featherCenter", "featherPoint", "feather")
+                )
+                if feather_center is not None:
+                    _add_position_key(feather_center, frame, 0.0, 0.0)
+
+    try:
+        curves_knob.changed()
+    except Exception:
+        pass
+
+
 def generate_roto_node(parent_node, json_path, width, height):
-    """Loads JSON contour tracking results and generates a native, animated closed Roto node."""
+    """Loads JSON contour tracking results and generates a native animated Roto node."""
     roto_data, err = _load_tracker_json(json_path)
     if err is not None:
         nuke.message(err)
@@ -2283,6 +2444,16 @@ def generate_roto_node(parent_node, json_path, width, height):
         nuke.message("Failed to import nuke.rotopaint. Cannot generate Roto node.")
         return False
 
+    open_group_names = set(getattr(landmarks_config, "OPEN_CONTOUR_GROUPS", set()))
+    open_contours = {
+        name: data for name, data in active_contours.items()
+        if name in open_group_names
+    }
+    closed_contours = {
+        name: data for name, data in active_contours.items()
+        if name not in open_group_names
+    }
+
     original_frame = None
     try:
         original_frame = int(nuke.frame())
@@ -2311,15 +2482,34 @@ def generate_roto_node(parent_node, json_path, width, height):
 
         parent_node.setSelected(True)
 
+        created_nodes = []
+
+        if open_contours and not closed_contours:
+            node_script = _build_open_roto_node_script(
+                open_contours,
+                f"Roto_Open_Face_{parent_node.name()}",
+                width,
+                height,
+            )
+            open_roto_node = _paste_node_script_in_context(parent_group, node_script)
+            if open_roto_node is None:
+                nuke.message("Failed to create open Roto spline node from generated script.")
+                return False
+            _animate_pasted_open_roto_contours(open_roto_node, open_contours)
+            parent_node.setSelected(True)
+            open_roto_node.setSelected(True)
+            return True
+
         # Create the Roto Node in the parent canvas context
         roto_node = _create_node_in_context(parent_group, 'Roto')
         roto_node.setName(f"Roto_Face_{parent_node.name()}")
+        created_nodes.append(roto_node)
 
         curves_knob = roto_node['curves']
         root_layer = curves_knob.rootLayer
 
         # Process each active contour group
-        for group_name, frame_data in active_contours.items():
+        for group_name, frame_data in closed_contours.items():
             sorted_frames = sorted([int(f) for f in frame_data.keys()])
             if not sorted_frames:
                 continue
@@ -2333,6 +2523,7 @@ def generate_roto_node(parent_node, json_path, width, height):
             shape.name = group_name
 
             is_closed = group_name not in getattr(landmarks_config, "OPEN_CONTOUR_GROUPS", set())
+            _set_roto_shape_closed_state(shape, is_closed, first_frame, group_name)
 
             # N1: Set the contour open/closed state. Try the private _curvelib
             # attribute set FIRST (the author deliberately uses _curvelib for Nuke 15+
@@ -2367,9 +2558,11 @@ def generate_roto_node(parent_node, json_path, width, height):
             for coords in first_points:
                 cp = rp.AnimControlPoint(coords[0], coords[1])
                 shape.append(cp)
+            _set_roto_shape_closed_state(shape, is_closed, first_frame, group_name)
 
             # Add the shape to the root layer first so its curves are registered with the knob
             root_layer.append(shape)
+            _set_roto_shape_closed_state(shape, is_closed, first_frame, group_name)
 
             # 3. Animate each control point over the available frames
             for frame in sorted_frames:
@@ -2420,8 +2613,23 @@ def generate_roto_node(parent_node, json_path, width, height):
         # Force Nuke to evaluate and refresh the curves in the viewer
         curves_knob.changed()
 
+        if open_contours:
+            node_script = _build_open_roto_node_script(
+                open_contours,
+                f"Roto_Open_Face_{parent_node.name()}",
+                width,
+                height,
+            )
+            open_roto_node = _paste_node_script_in_context(parent_group, node_script)
+            if open_roto_node is None:
+                nuke.message("Failed to create open Roto spline node from generated script.")
+                return False
+            _animate_pasted_open_roto_contours(open_roto_node, open_contours)
+            created_nodes.append(open_roto_node)
+
         parent_node.setSelected(True)
-        roto_node.setSelected(True)
+        for node in created_nodes:
+            node.setSelected(True)
     finally:
         if original_frame is not None:
             try:
