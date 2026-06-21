@@ -122,6 +122,35 @@ class TestTrackerRefinement(unittest.TestCase):
         values.update(overrides)
         return {key: MagicMock(value=lambda v=v: v) for key, v in values.items()}
 
+    def test_roto_panel_groups_contours_by_face_part(self):
+        groups = {group["label"]: group for group in nuke_tracker.get_roto_contour_groups()}
+
+        self.assertIn("Face", groups)
+        self.assertIn("Eyes", groups)
+        self.assertIn("Mouth", groups)
+        self.assertIn("Nose", groups)
+        self.assertEqual(groups["Face"]["knob"], "roto_group_face")
+        self.assertTrue(any(item["knob"] == "roto_face_symmetry_axis" for item in groups["Face"]["items"]))
+        self.assertTrue(all(" / " not in item["label"] for group in groups.values() for item in group["items"]))
+
+    def test_roto_group_selection_updates_child_knobs(self):
+        face_group = next(group for group in nuke_tracker.get_roto_contour_groups() if group["label"] == "Face")
+        child_knobs = {item["knob"]: MagicMock() for item in face_group["items"]}
+        node = MagicMock()
+        node.__getitem__.side_effect = lambda key: child_knobs[key]
+
+        changed = nuke_tracker.set_roto_group_selection(node, "roto_group_face", False)
+
+        self.assertTrue(changed)
+        for child in child_knobs.values():
+            child.setValue.assert_called_once_with(False)
+
+    def test_knob_changed_script_handles_roto_group_toggles(self):
+        script = nuke_tracker._build_knob_changed_script()
+
+        self.assertIn("roto_group_", script)
+        self.assertIn("set_roto_group_selection", script)
+
     def test_analysis_tracks_all_roto_export_contours(self):
         """Tracking stores all Roto-tab contours so export choices can be changed later."""
         mock_node = MagicMock()
@@ -795,10 +824,11 @@ class TestTrackerRefinement(unittest.TestCase):
 
         open_script = nuke_tracker._build_open_roto_node_script(
             dummy_roto_data,
-            "Roto_Open_FaceTrackerRoto",
+            "Roto_Face_FaceTrackerRoto",
             1920,
             1080,
         )
+        curves_script = nuke_tracker._build_open_roto_curves_script(dummy_roto_data, 1920, 1080)
 
         with patch("os.path.exists", return_value=True), \
              patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(dummy_roto_data))):
@@ -807,9 +837,11 @@ class TestTrackerRefinement(unittest.TestCase):
         self.assertTrue(success)
         self.assertIn("curvegroup roto_face_symmetry_axis 1049088 bezier", open_script)
         self.assertIn("{f 1056800}", open_script)
-        self.assertIn("Roto_Open_FaceTrackerRoto", open_script)
+        self.assertIn("Roto_Face_FaceTrackerRoto", open_script)
+        self.assertIn("curvegroup roto_face_symmetry_axis 1049088 bezier", curves_script)
         mock_rp.Shape.assert_not_called()
         mock_nuke.createNode.assert_not_called()
+        mock_curves.fromScript.assert_not_called()
         mock_nuke.nodePaste.assert_called_once()
 
     def test_generate_tracker_node_expands_dense_contour_groups(self):

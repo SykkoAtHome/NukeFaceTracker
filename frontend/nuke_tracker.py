@@ -246,6 +246,58 @@ def get_roto_export_contour_names():
     return [contour_name for _, contour_name in get_roto_contour_options()]
 
 
+def _roto_group_key(group_label):
+    return re.sub(r"[^a-z0-9]+", "_", str(group_label).strip().lower()).strip("_") or "other"
+
+
+def _split_roto_label(label):
+    if " / " not in label:
+        return "Other", label.strip()
+    group_label, child_label = label.split(" / ", 1)
+    return group_label.strip(), child_label.strip()
+
+
+def get_roto_contour_groups():
+    grouped = {}
+    group_order = []
+    for knob_name, contour_name, label, default_value in get_roto_contour_knob_specs():
+        group_label, child_label = _split_roto_label(label)
+        group_key = _roto_group_key(group_label)
+        if group_key not in grouped:
+            grouped[group_key] = {
+                "key": group_key,
+                "label": group_label,
+                "knob": f"roto_group_{group_key}",
+                "items": [],
+            }
+            group_order.append(group_key)
+        grouped[group_key]["items"].append({
+            "knob": knob_name,
+            "contour": contour_name,
+            "label": child_label,
+            "default": default_value,
+            "open": contour_name in getattr(landmarks_config, "OPEN_CONTOUR_GROUPS", set()),
+        })
+
+    preferred = ["face", "eyes", "mouth", "nose", "eyebrows", "other"]
+    ordered_keys = [key for key in preferred if key in grouped]
+    ordered_keys.extend(key for key in group_order if key not in ordered_keys)
+    return tuple(grouped[key] for key in ordered_keys)
+
+
+def set_roto_group_selection(node, group_knob_name, enabled):
+    for group in get_roto_contour_groups():
+        if group["knob"] != group_knob_name:
+            continue
+        for item in group["items"]:
+            try:
+                node[item["knob"]].setValue(bool(enabled))
+            except Exception:
+                pass
+        return True
+    return False
+
+
 def get_selected_roto_contours(node):
     selected_contours = []
 
@@ -443,18 +495,50 @@ def _build_roto_tab(node):
     roto_tab = nuke.Tab_Knob("roto_tab", "Roto")
     node.addKnob(roto_tab)
 
-    divider_roto = nuke.Text_Knob("divider_roto_landmarks", "Select Contours for Roto Splines", "")
+    divider_roto = nuke.Text_Knob(
+        "divider_roto_landmarks",
+        "",
+        "<b>Select Roto Splines</b> <span style='color:#888'>Use group toggles for fast setup, then refine individual contours.</span>"
+    )
     node.addKnob(divider_roto)
 
-    for idx, (knob_name, _contour_name, label, default_value) in enumerate(get_roto_contour_knob_specs()):
-        roto_knob = nuke.Boolean_Knob(knob_name, label, default_value)
-        if idx % 2 == 0:
-            roto_knob.setFlag(nuke.STARTLINE)
-        else:
-            roto_knob.clearFlag(nuke.STARTLINE)
-        node.addKnob(roto_knob)
+    for group in get_roto_contour_groups():
+        group_count = len(group["items"])
+        open_count = len([item for item in group["items"] if item["open"]])
+        open_suffix = f" &nbsp; <span style='color:#9a9a9a'>{open_count} open</span>" if open_count else ""
+        header = nuke.Text_Knob(
+            f"roto_header_{group['key']}",
+            "",
+            "<hr><span style='color:#d6d6d6'><b>{}</b></span> "
+            "<span style='color:#8a8a8a'>({} contours)</span>{}".format(
+                group["label"], group_count, open_suffix
+            )
+        )
+        header.setFlag(nuke.STARTLINE)
+        node.addKnob(header)
 
-    node.addKnob(nuke.Text_Knob("divider_roto_action", "", ""))
+        group_default = all(item["default"] for item in group["items"])
+        group_knob = nuke.Boolean_Knob(group["knob"], "On/Off", group_default)
+        group_knob.setTooltip(f"Toggle every {group['label']} Roto contour in this group.")
+        group_knob.clearFlag(nuke.STARTLINE)
+        node.addKnob(group_knob)
+
+        for idx, item in enumerate(group["items"]):
+            label = item["label"]
+            if item["open"]:
+                label = f"{label} [open]"
+            roto_knob = nuke.Boolean_Knob(item["knob"], label, item["default"])
+            if idx % 2 == 0:
+                roto_knob.setFlag(nuke.STARTLINE)
+            else:
+                roto_knob.clearFlag(nuke.STARTLINE)
+            node.addKnob(roto_knob)
+
+        spacer = nuke.Text_Knob(f"roto_group_spacer_{group['key']}", "", "")
+        spacer.setFlag(nuke.STARTLINE)
+        node.addKnob(spacer)
+
+    node.addKnob(nuke.Text_Knob("divider_roto_action", "", "<hr>"))
 
     # Bezier Spline Toggle (Cusped Bezier)
     roto_bezier = nuke.Boolean_Knob("roto_bezier", "Cusped Bezier", False)
@@ -512,7 +596,7 @@ def _build_gridwarp_tab(node):
 
 def _build_knob_changed_script():
     """Return the multi-line knobChanged callback script that drives dynamic knob
-    visibility (anchor_stiffness / info_full_mesh / output_json)."""
+    visibility and grouped Roto contour selection."""
     return (
         "n = nuke.thisNode()\n"
         "k = nuke.thisKnob()\n"
@@ -524,6 +608,9 @@ def _build_knob_changed_script():
         "    n['info_full_mesh'].setVisible(is_full)\n"
         "elif k.name() == 'write_to_file':\n"
         "    n['output_json'].setVisible(k.value())\n"
+        "elif k.name().startswith('roto_group_'):\n"
+        "    import nuke_tracker\n"
+        "    nuke_tracker.set_roto_group_selection(n, k.name(), k.value())\n"
     )
 
 
@@ -2305,7 +2392,7 @@ def _build_open_roto_curvegroup_script(name, points):
     ])
 
 
-def _build_open_roto_node_script(open_contours, node_name, width, height):
+def _build_open_roto_curves_script(open_contours, width, height):
     curvegroups = []
     for group_name, frame_data in open_contours.items():
         first_frame = min(int(frame) for frame in frame_data.keys())
@@ -2320,9 +2407,7 @@ def _build_open_roto_node_script(open_contours, node_name, width, height):
         "pterr 0 ptrefset 0 ptmot x40800000 ptref 0}"
     )
     return "\n".join([
-        "Roto {",
-        " output alpha",
-        " curves {{{v x3f99999a}",
+        "{{{v x3f99999a}",
         "  {f 0}",
         "  {n",
         "   {layer Root",
@@ -2330,6 +2415,16 @@ def _build_open_roto_node_script(open_contours, node_name, width, height):
         "    {t " + _nuke_hex_float(width / 2.0) + " " + _nuke_hex_float(height / 2.0) + "}",
         "    " + layer_attrs,
         "\n".join(curvegroups),
+        "",
+    ])
+
+
+def _build_open_roto_node_script(open_contours, node_name, width, height):
+    curves_script = _build_open_roto_curves_script(open_contours, width, height)
+    return "\n".join([
+        "Roto {",
+        " output alpha",
+        " curves " + curves_script,
         " name " + _safe_nuke_node_name(node_name),
         "}",
         "",
@@ -2482,31 +2577,26 @@ def generate_roto_node(parent_node, json_path, width, height):
 
         parent_node.setSelected(True)
 
-        created_nodes = []
-
-        if open_contours and not closed_contours:
+        if open_contours:
             node_script = _build_open_roto_node_script(
                 open_contours,
-                f"Roto_Open_Face_{parent_node.name()}",
+                f"Roto_Face_{parent_node.name()}",
                 width,
                 height,
             )
-            open_roto_node = _paste_node_script_in_context(parent_group, node_script)
-            if open_roto_node is None:
-                nuke.message("Failed to create open Roto spline node from generated script.")
+            roto_node = _paste_node_script_in_context(parent_group, node_script)
+            if roto_node is None:
+                nuke.message("Failed to create Roto node from generated open spline script.")
                 return False
-            _animate_pasted_open_roto_contours(open_roto_node, open_contours)
-            parent_node.setSelected(True)
-            open_roto_node.setSelected(True)
-            return True
-
-        # Create the Roto Node in the parent canvas context
-        roto_node = _create_node_in_context(parent_group, 'Roto')
-        roto_node.setName(f"Roto_Face_{parent_node.name()}")
-        created_nodes.append(roto_node)
+        else:
+            # Create the Roto Node in the parent canvas context
+            roto_node = _create_node_in_context(parent_group, 'Roto')
+            roto_node.setName(f"Roto_Face_{parent_node.name()}")
 
         curves_knob = roto_node['curves']
         root_layer = curves_knob.rootLayer
+        if open_contours:
+            _animate_pasted_open_roto_contours(roto_node, open_contours)
 
         # Process each active contour group
         for group_name, frame_data in closed_contours.items():
@@ -2613,23 +2703,8 @@ def generate_roto_node(parent_node, json_path, width, height):
         # Force Nuke to evaluate and refresh the curves in the viewer
         curves_knob.changed()
 
-        if open_contours:
-            node_script = _build_open_roto_node_script(
-                open_contours,
-                f"Roto_Open_Face_{parent_node.name()}",
-                width,
-                height,
-            )
-            open_roto_node = _paste_node_script_in_context(parent_group, node_script)
-            if open_roto_node is None:
-                nuke.message("Failed to create open Roto spline node from generated script.")
-                return False
-            _animate_pasted_open_roto_contours(open_roto_node, open_contours)
-            created_nodes.append(open_roto_node)
-
         parent_node.setSelected(True)
-        for node in created_nodes:
-            node.setSelected(True)
+        roto_node.setSelected(True)
     finally:
         if original_frame is not None:
             try:
