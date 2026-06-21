@@ -1,18 +1,4 @@
 'use strict';
-function avgPoint(ids){const p=[0,0,0]; for(const id of ids){const v=VERTICES[id]; p[0]+=v[0]; p[1]+=v[1]; p[2]+=v[2];} return p.map(v=>v/ids.length);}
-function virtualIrisPoint(id){
-  const left=id>=468&&id<=472;
-  const center=left?avgPoint([362,263,386,374]):avgPoint([133,33,159,145]);
-  const inner=VERTICES[left?362:133], outer=VERTICES[left?263:33], top=VERTICES[left?386:159], bottom=VERTICES[left?374:145];
-  const rx=[(outer[0]-inner[0])*.14,(outer[1]-inner[1])*.14,(outer[2]-inner[2])*.14];
-  const ry=[(top[0]-bottom[0])*.16,(top[1]-bottom[1])*.16,(top[2]-bottom[2])*.16];
-  const ring=left?{469:[-1,0],470:[0,1],471:[1,0],472:[0,-1]}:{474:[-1,0],475:[0,1],476:[1,0],477:[0,-1]};
-  const o=ring[id]||[0,0];
-  return [center[0]+rx[0]*o[0]+ry[0]*o[1], center[1]+rx[1]*o[0]+ry[1]*o[1], center[2]+rx[2]*o[0]+ry[2]*o[1]];
-}
-function landmarkPoint(id){return VERTICES[id]||virtualIrisPoint(id);}
-function modelCenter3d(){let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity,minZ=Infinity,maxZ=-Infinity; for(let i=0;i<MAX_LANDMARKS;i++){const v=landmarkPoint(i); minX=Math.min(minX,v[0]); maxX=Math.max(maxX,v[0]); minY=Math.min(minY,v[1]); maxY=Math.max(maxY,v[1]); minZ=Math.min(minZ,v[2]); maxZ=Math.max(maxZ,v[2]);} return [(minX+maxX)/2,(minY+maxY)/2,(minZ+maxZ)/2];}
-const MODEL_CENTER_3D = modelCenter3d();
 function centeredPoint(v){return [v[0]-MODEL_CENTER_3D[0],v[1]-MODEL_CENTER_3D[1],v[2]-MODEL_CENTER_3D[2]];}
 function free3dBounds(){let radius=0; for(let i=0;i<MAX_LANDMARKS;i++){const v=centeredPoint(landmarkPoint(i)); radius=Math.max(radius,Math.hypot(v[0],v[1],v[2]));} return {minX:-radius,maxX:radius,minY:-radius,maxY:radius};}
 const FREE3D_BOUNDS = free3dBounds();
