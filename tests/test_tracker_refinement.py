@@ -1242,6 +1242,88 @@ class TestTrackerRefinement(unittest.TestCase):
         self.assertEqual(set(payload["source"].keys()), {"1", "3"})
         self.assertEqual(payload["reference_frame"], 1)
 
+    def test_gridwarp_scripts_target_native_grid_knobs(self):
+        """GridWarp scripts must match Nuke's source_grid_col/destination_grid_col payload shape."""
+        payload = {
+            "rows": 2,
+            "cols": 2,
+            "reference_frame": 1,
+            "destination": [
+                {"row": 0, "col": 0, "id": 1, "x": 10.0, "y": 20.0},
+                {"row": 0, "col": 1, "id": 2, "x": 40.0, "y": 20.0},
+                {"row": 1, "col": 0, "id": 3, "x": 10.0, "y": 80.0},
+                {"row": 1, "col": 1, "id": 4, "x": 40.0, "y": 80.0},
+            ],
+            "source": {
+                "1": [
+                    {"row": 0, "col": 0, "x": 11.0, "y": 21.0},
+                    {"row": 0, "col": 1, "x": 41.0, "y": 21.0},
+                    {"row": 1, "col": 0, "x": 11.0, "y": 81.0},
+                    {"row": 1, "col": 1, "x": 41.0, "y": 81.0},
+                ],
+                "5": [
+                    {"row": 0, "col": 0, "x": 12.0, "y": 22.0},
+                    {"row": 0, "col": 1, "x": 42.0, "y": 22.0},
+                    {"row": 1, "col": 0, "x": 12.0, "y": 82.0},
+                    {"row": 1, "col": 1, "x": 42.0, "y": 82.0},
+                ],
+            },
+        }
+
+        source_script = nuke_tracker._build_gridwarp_source_script(payload)
+        destination_script = nuke_tracker._build_gridwarp_destination_script(payload)
+        node_script = nuke_tracker._build_gridwarp_node_script(payload, "GridWarp_Face_Test")
+
+        self.assertIn("1 2 2 4 1 0", source_script)
+        self.assertIn("{curve L x1 11 x5 12}", source_script)
+        self.assertIn("{curve L x1 21 x5 22}", source_script)
+        self.assertIn("{curve L x1 10 x5 10}", source_script)
+        self.assertIn("1 2 2 4 1 0", destination_script)
+        self.assertIn("{2 10 20}", destination_script)
+        self.assertIn("{2 10 0}", destination_script)
+        self.assertNotIn("facetracker_grid_payload", source_script)
+        self.assertNotIn("facetracker_grid_payload", destination_script)
+        self.assertIn("GridWarp3 {", node_script)
+        self.assertIn("source_grid_col", node_script)
+        self.assertIn("destination_grid_col", node_script)
+        self.assertIn("source_grid_transform_center {25 50}", node_script)
+
+    def test_generate_gridwarp_node_populates_native_grid_knobs(self):
+        """GridWarp export pastes a complete native GridWarp script instead of editing default grid knobs."""
+        import json
+
+        mock_parent = MagicMock()
+        mock_parent.name.return_value = "FaceTracker1"
+        mock_parent.parent.return_value = MagicMock()
+        knobs = {
+            'start_frame': MagicMock(value=lambda: 1),
+            'end_frame': MagicMock(value=lambda: 2),
+            'grid_ref_frame': MagicMock(value=lambda: 1),
+        }
+        mock_parent.__getitem__.side_effect = lambda key: knobs[key]
+
+        tracker_data = {}
+        for point in nuke_tracker._grid_points_from_mapping()[2]:
+            tracker_data[point["track"]] = {
+                "1": [float(point["col"] * 10), float(point["row"] * 20)],
+                "2": [float(point["col"] * 10 + 1), float(point["row"] * 20 + 2)],
+            }
+
+        mock_gridwarp = MagicMock()
+        mock_nuke.nodePaste.return_value = mock_gridwarp
+        mock_nuke.allNodes.return_value = []
+
+        with patch("os.path.exists", return_value=True), \
+             patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(tracker_data))):
+            success = nuke_tracker.generate_gridwarp_node(mock_parent, "dummy.json", 1920, 1080)
+
+        self.assertTrue(success)
+        mock_nuke.createNode.assert_not_called()
+        mock_nuke.nodePaste.assert_called_once()
+        paste_path = mock_nuke.nodePaste.call_args.args[0]
+        self.assertTrue(os.path.basename(paste_path).startswith("facetracker_gridwarp_"))
+        mock_gridwarp.addKnob.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # run_tracking_on_node orchestration tests (the Track-Face entry point).

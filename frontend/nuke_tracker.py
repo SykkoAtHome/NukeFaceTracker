@@ -1730,42 +1730,192 @@ def _grid_payload_from_tracks(tracker_data, start_frame, end_frame, ref_frame):
     }, None
 
 
-def _add_gridwarp_payload_knobs(gridwarp, payload):
-    """Attach the generated payload for versions where GridWarp grid knobs differ."""
+def _gridwarp_number(value):
+    if isinstance(value, int):
+        return str(value)
+    value = float(value)
+    if abs(value) < 0.0000001:
+        value = 0.0
+    return f"{value:.6f}".rstrip("0").rstrip(".")
+
+
+def _gridwarp_curve(frame_values):
+    parts = ["curve", "L"]
+    for frame, value in sorted(frame_values.items()):
+        parts.append(f"x{int(frame)}")
+        parts.append(_gridwarp_number(value))
+    return "{" + " ".join(parts) + "}"
+
+
+def _gridwarp_points_by_position(points):
+    return {(int(point["row"]), int(point["col"])): point for point in points}
+
+
+def _gridwarp_handle(points_by_position, row, col, direction):
+    point = points_by_position[(row, col)]
+    if direction == "down":
+        neighbor = points_by_position.get((row + 1, col))
+        fallback = points_by_position.get((row - 1, col))
+        if neighbor:
+            return [(neighbor["x"] - point["x"]) / 3.0, (neighbor["y"] - point["y"]) / 3.0]
+        if fallback:
+            return [(point["x"] - fallback["x"]) / 3.0, (point["y"] - fallback["y"]) / 3.0]
+    elif direction == "up":
+        neighbor = points_by_position.get((row - 1, col))
+        fallback = points_by_position.get((row + 1, col))
+        if neighbor:
+            return [(neighbor["x"] - point["x"]) / 3.0, (neighbor["y"] - point["y"]) / 3.0]
+        if fallback:
+            return [(point["x"] - fallback["x"]) / 3.0, (point["y"] - fallback["y"]) / 3.0]
+    elif direction == "right":
+        neighbor = points_by_position.get((row, col + 1))
+        fallback = points_by_position.get((row, col - 1))
+        if neighbor:
+            return [(neighbor["x"] - point["x"]) / 3.0, (neighbor["y"] - point["y"]) / 3.0]
+        if fallback:
+            return [(point["x"] - fallback["x"]) / 3.0, (point["y"] - fallback["y"]) / 3.0]
+    elif direction == "left":
+        neighbor = points_by_position.get((row, col - 1))
+        fallback = points_by_position.get((row, col + 1))
+        if neighbor:
+            return [(neighbor["x"] - point["x"]) / 3.0, (neighbor["y"] - point["y"]) / 3.0]
+        if fallback:
+            return [(point["x"] - fallback["x"]) / 3.0, (point["y"] - fallback["y"]) / 3.0]
+    return [0.0, 0.0]
+
+
+def _gridwarp_static_handle_script(points_by_position, row, col, direction):
+    handle = _gridwarp_handle(points_by_position, row, col, direction)
+    return "{{2 {} {}}}".format(_gridwarp_number(handle[0]), _gridwarp_number(handle[1]))
+
+
+def _gridwarp_animated_handle_script(frames_by_key, row, col, direction):
+    x_values = {}
+    y_values = {}
+    for frame_key, points_by_position in frames_by_key.items():
+        handle = _gridwarp_handle(points_by_position, row, col, direction)
+        x_values[int(frame_key)] = handle[0]
+        y_values[int(frame_key)] = handle[1]
+    return "{{1 {} {}}}".format(_gridwarp_curve(x_values), _gridwarp_curve(y_values))
+
+
+def _build_gridwarp_destination_script(payload):
+    rows = payload["rows"]
+    cols = payload["cols"]
+    points_by_position = _gridwarp_points_by_position(payload["destination"])
+    lines = [
+        "{",
+        f"  1 {cols} {rows} 4 1 0",
+        "  {default }",
+        "  {",
+    ]
+
+    for row in range(rows):
+        for col in range(cols):
+            point = points_by_position[(row, col)]
+            center = "{{2 {} {}}}".format(_gridwarp_number(point["x"]), _gridwarp_number(point["y"]))
+            handles = " ".join(
+                _gridwarp_static_handle_script(points_by_position, row, col, direction)
+                for direction in ("down", "up", "right", "left")
+            )
+            lines.append(f"    {{ {center} {{ {handles} }} }}")
+
+    lines.extend(["  }", "}"])
+    return "\n".join(lines)
+
+
+def _build_gridwarp_source_script(payload):
+    rows = payload["rows"]
+    cols = payload["cols"]
+    frames_by_key = {
+        int(frame_key): _gridwarp_points_by_position(points)
+        for frame_key, points in payload["source"].items()
+    }
+    lines = [
+        "{",
+        f"  1 {cols} {rows} 4 1 0",
+        "  {default }",
+        "  {",
+    ]
+
+    for row in range(rows):
+        for col in range(cols):
+            x_values = {}
+            y_values = {}
+            for frame_key, points_by_position in frames_by_key.items():
+                point = points_by_position[(row, col)]
+                x_values[frame_key] = point["x"]
+                y_values[frame_key] = point["y"]
+            center = "{{1 {} {}}}".format(_gridwarp_curve(x_values), _gridwarp_curve(y_values))
+            handles = " ".join(
+                _gridwarp_animated_handle_script(frames_by_key, row, col, direction)
+                for direction in ("down", "up", "right", "left")
+            )
+            lines.append(f"    {{ {center} {{ {handles} }} }}")
+
+    lines.extend(["  }", "}"])
+    return "\n".join(lines)
+
+
+def _nuke_script_quote(value):
+    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n") + '"'
+
+
+def _safe_nuke_node_name(value):
+    safe = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in str(value))
+    return safe or "FaceTracker"
+
+
+def _build_gridwarp_node_script(payload, node_name):
+    center_x = sum(point["x"] for point in payload["destination"]) / len(payload["destination"])
+    center_y = sum(point["y"] for point in payload["destination"]) / len(payload["destination"])
+    label = "Ref Frame: {}\n{} x {} FaceTracker grid".format(
+        payload["reference_frame"], payload["cols"], payload["rows"]
+    )
+    source_script = _build_gridwarp_source_script(payload)
+    destination_script = _build_gridwarp_destination_script(payload)
+    return "\n".join([
+        "GridWarp3 {",
+        " toolbar_visibility_src false",
+        " source_grid_col   " + source_script.replace("\n", "\n "),
+        " source_grid_visible true",
+        " destination_grid_col   " + destination_script.replace("\n", "\n "),
+        " destination_grid_visible false",
+        " grids_manually_moved true",
+        " source_grid_transform_center {{{} {}}}".format(_gridwarp_number(center_x), _gridwarp_number(center_y)),
+        " destination_grid_transform_center {{{} {}}}".format(_gridwarp_number(center_x), _gridwarp_number(center_y)),
+        " name " + _safe_nuke_node_name(node_name),
+        " label " + _nuke_script_quote(label),
+        "}",
+        "",
+    ])
+
+
+def _paste_node_script_in_context(context, node_script):
+    temp_path = None
     try:
-        gridwarp.addKnob(nuke.Tab_Knob("facetracker_grid_tab", "FaceTracker Grid"))
-        payload_knob = nuke.String_Knob("facetracker_grid_payload", "Grid Payload")
-        payload_knob.setValue(json.dumps(payload, separators=(",", ":")))
-        gridwarp.addKnob(payload_knob)
-    except Exception:
-        pass
-
-
-def _try_populate_gridwarp_knobs(gridwarp, payload):
-    """Best-effort population for Nuke builds exposing scriptable grid knobs."""
-    knobs = gridwarp.knobs()
-    for rows_name in ("rows", "grid_rows", "source_grid_rows"):
-        if rows_name in knobs:
+        fd, temp_path = tempfile.mkstemp(prefix="facetracker_gridwarp_", suffix=".nk")
+        with os.fdopen(fd, "w") as f:
+            f.write(node_script)
+        before = set(_all_nodes_in_context(context))
+        with context:
+            pasted = nuke.nodePaste(temp_path)
+        if pasted is not None:
+            return pasted
+        after = set(_all_nodes_in_context(context))
+        created = list(after - before)
+        if created:
+            return created[0]
+        try:
+            return nuke.selectedNode()
+        except Exception:
+            return None
+    finally:
+        if temp_path:
             try:
-                gridwarp[rows_name].setValue(payload["rows"])
+                os.remove(temp_path)
             except Exception:
                 pass
-    for cols_name in ("columns", "cols", "grid_columns", "source_grid_columns"):
-        if cols_name in knobs:
-            try:
-                gridwarp[cols_name].setValue(payload["cols"])
-            except Exception:
-                pass
-
-    populated = False
-    for knob_name in ("facetracker_grid_payload", "grid_payload"):
-        if knob_name in knobs:
-            try:
-                gridwarp[knob_name].setValue(json.dumps(payload, separators=(",", ":")))
-                populated = True
-            except Exception:
-                pass
-    return populated
 
 
 def generate_gridwarp_node(parent_node, json_path, width, height):
@@ -1793,21 +1943,17 @@ def generate_gridwarp_node(parent_node, json_path, width, height):
     _deselect_nodes_in_context(parent_group)
     parent_node.setSelected(True)
 
+    node_name = f"GridWarp_Face_{parent_node.name()}"
+    node_script = _build_gridwarp_node_script(payload, node_name)
     try:
-        gridwarp = _create_node_in_context(parent_group, 'GridWarp3')
-    except Exception:
-        gridwarp = _create_node_in_context(parent_group, 'GridWarp')
-    gridwarp.setName(f"GridWarp_Face_{parent_node.name()}")
+        gridwarp = _paste_node_script_in_context(parent_group, node_script)
+    except Exception as e:
+        nuke.message(f"Failed to create GridWarp node from generated script:\n{str(e)}")
+        return False
 
-    _add_gridwarp_payload_knobs(gridwarp, payload)
-    _try_populate_gridwarp_knobs(gridwarp, payload)
-
-    try:
-        gridwarp['label'].setValue("Ref Frame: {}\n{} x {} FaceTracker grid".format(
-            payload["reference_frame"], payload["cols"], payload["rows"]
-        ))
-    except Exception:
-        pass
+    if gridwarp is None:
+        nuke.message("Failed to create GridWarp node from generated script.")
+        return False
 
     parent_node.setSelected(True)
     gridwarp.setSelected(True)
