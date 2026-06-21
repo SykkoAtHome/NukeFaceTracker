@@ -133,6 +133,23 @@ class TestTrackerRefinement(unittest.TestCase):
         self.assertTrue(any(item["knob"] == "roto_face_symmetry_axis" for item in groups["Face"]["items"]))
         self.assertTrue(all(" / " not in item["label"] for group in groups.values() for item in group["items"]))
 
+    def test_roto_item_column_rows_keep_pairs_and_pad_left_column(self):
+        items = [
+            {"label": "Short", "open": False},
+            {"label": "Right A", "open": False},
+            {"label": "Longer Label", "open": True},
+            {"label": "Right B", "open": False},
+        ]
+
+        rows = list(nuke_tracker._iter_roto_item_column_rows(items))
+
+        self.assertEqual(rows[0][2]["label"], "Right A")
+        self.assertEqual(rows[1][2]["label"], "Right B")
+        self.assertEqual(rows[0][3], "Right A")
+        self.assertEqual(rows[1][3], "Right B")
+        self.assertEqual(len(rows[0][1]), len(rows[1][1]))
+        self.assertTrue(rows[1][1].startswith("Longer Label [open]"))
+
     def test_roto_group_selection_updates_child_knobs(self):
         face_group = next(group for group in nuke_tracker.get_roto_contour_groups() if group["label"] == "Face")
         child_knobs = {item["knob"]: MagicMock() for item in face_group["items"]}

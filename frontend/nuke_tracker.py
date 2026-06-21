@@ -298,6 +298,26 @@ def set_roto_group_selection(node, group_knob_name, enabled):
     return False
 
 
+def _format_roto_item_label(item):
+    label = item["label"]
+    if item["open"]:
+        label = f"{label} [open]"
+    return label
+
+
+def _iter_roto_item_column_rows(items):
+    """Yield Roto contour rows as padded two-column pairs."""
+    left_items = items[::2]
+    right_items = items[1::2]
+    left_width = max((len(_format_roto_item_label(item)) for item in left_items), default=0)
+
+    for idx, left_item in enumerate(left_items):
+        right_item = right_items[idx] if idx < len(right_items) else None
+        left_label = _format_roto_item_label(left_item).ljust(left_width + 4)
+        right_label = _format_roto_item_label(right_item) if right_item else None
+        yield left_item, left_label, right_item, right_label
+
+
 def get_selected_roto_contours(node):
     selected_contours = []
 
@@ -505,40 +525,30 @@ def _build_roto_tab(node):
     for group in get_roto_contour_groups():
         group_count = len(group["items"])
         open_count = len([item for item in group["items"] if item["open"]])
-        open_suffix = f" &nbsp; <span style='color:#9a9a9a'>{open_count} open</span>" if open_count else ""
-        header = nuke.Text_Knob(
-            f"roto_header_{group['key']}",
-            "",
-            "<hr><span style='color:#d6d6d6'><b>{}</b></span> "
-            "<span style='color:#8a8a8a'>({} contours)</span>{}".format(
-                group["label"], group_count, open_suffix
-            )
-        )
-        header.setFlag(nuke.STARTLINE)
-        node.addKnob(header)
-
-        group_default = all(item["default"] for item in group["items"])
-        group_knob = nuke.Boolean_Knob(group["knob"], "On/Off", group_default)
-        group_knob.setTooltip(f"Toggle every {group['label']} Roto contour in this group.")
-        group_knob.clearFlag(nuke.STARTLINE)
-        node.addKnob(group_knob)
-
-        for idx, item in enumerate(group["items"]):
-            label = item["label"]
-            if item["open"]:
-                label = f"{label} [open]"
-            roto_knob = nuke.Boolean_Knob(item["knob"], label, item["default"])
-            if idx % 2 == 0:
-                roto_knob.setFlag(nuke.STARTLINE)
-            else:
-                roto_knob.clearFlag(nuke.STARTLINE)
-            node.addKnob(roto_knob)
+        open_suffix = f"  {open_count} open" if open_count else ""
+        group_label = "{} ({} contours){}".format(group["label"], group_count, open_suffix)
 
         spacer = nuke.Text_Knob(f"roto_group_spacer_{group['key']}", "", "")
         spacer.setFlag(nuke.STARTLINE)
         node.addKnob(spacer)
 
-    node.addKnob(nuke.Text_Knob("divider_roto_action", "", "<hr>"))
+        group_default = all(item["default"] for item in group["items"])
+        group_knob = nuke.Boolean_Knob(group["knob"], group_label, group_default)
+        group_knob.setTooltip(f"Toggle every {group['label']} Roto contour in this group.")
+        group_knob.setFlag(nuke.STARTLINE)
+        node.addKnob(group_knob)
+
+        for left_item, left_label, right_item, right_label in _iter_roto_item_column_rows(group["items"]):
+            left_knob = nuke.Boolean_Knob(left_item["knob"], left_label, left_item["default"])
+            left_knob.setFlag(nuke.STARTLINE)
+            node.addKnob(left_knob)
+
+            if right_item:
+                right_knob = nuke.Boolean_Knob(right_item["knob"], right_label, right_item["default"])
+                right_knob.clearFlag(nuke.STARTLINE)
+                node.addKnob(right_knob)
+
+    node.addKnob(nuke.Text_Knob("divider_roto_action", "", ""))
 
     # Bezier Spline Toggle (Cusped Bezier)
     roto_bezier = nuke.Boolean_Knob("roto_bezier", "Cusped Bezier", False)
