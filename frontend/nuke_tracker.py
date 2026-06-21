@@ -170,6 +170,11 @@ def find_vector_channels(node):
 
 
 
+def _resolve_root_frame_range():
+    """Return the project frame range from the Nuke root settings."""
+    return int(nuke.root().firstFrame()), int(nuke.root().lastFrame())
+
+
 def _resolve_input_frame_range(input_node):
     """Resolve the effective frame range of an input node.
 
@@ -189,8 +194,7 @@ def _resolve_input_frame_range(input_node):
 
     # Fallback to root settings if still default/invalid
     if start == end and start == 0:
-        start = int(nuke.root().firstFrame())
-        end = int(nuke.root().lastFrame())
+        start, end = _resolve_root_frame_range()
 
     return start, end
 
@@ -300,7 +304,6 @@ def _configure_mapping_for_node(node, show_errors=True):
 def reload_mapping_from_panel(node):
     if not _configure_mapping_for_node(node):
         return False
-    nuke.message("Landmark mapping loaded:\n{}".format(landmarks_config.get_active_mapping_path()))
     return True
 
 
@@ -547,20 +550,19 @@ def create_face_tracker_node():
         output.setInput(0, input_source)
 
     # Resolve initial ranges based on selected nodes or project
-    start_frame = 1
-    end_frame = 100
+    start_frame, end_frame = _resolve_root_frame_range()
 
     input_node = node.input(0)
     if input_node:
         start_frame, end_frame = _resolve_input_frame_range(input_node)
 
     # Build the tabs in order, then attach the dynamic knobChanged script.
-    _build_settings_tab(node)
     _build_tracking_tab(node, start_frame, end_frame)
     _build_tracker_tab(node)
     _build_roto_tab(node)
     _build_cornerpin_tab(node)
     _build_gridwarp_tab(node)
+    _build_settings_tab(node)
 
     # Dynamic visibility callback script set on the knobChanged callback
     node['knobChanged'].setValue(_build_knob_changed_script())
@@ -786,6 +788,7 @@ def _run_tracking_passes(passes_to_run, task, start_frame, end_frame):
         import queue as _queue
 
         stdout_q = _queue.Queue()
+        stdout_eof = object()
 
         def _stdout_reader(stream, q):
             try:
@@ -795,7 +798,7 @@ def _run_tracking_passes(passes_to_run, task, start_frame, end_frame):
                 pass
             finally:
                 # Sentinel: stdout closed (EOF) or reader failed.
-                q.put(None)
+                q.put(stdout_eof)
 
         reader_thread = threading.Thread(target=_stdout_reader, args=(process.stdout, stdout_q))
         reader_thread.daemon = True
@@ -822,9 +825,13 @@ def _run_tracking_passes(passes_to_run, task, start_frame, end_frame):
             try:
                 line = stdout_q.get(timeout=0.1)
             except _queue.Empty:
-                line = None
+                if process.poll() is None:
+                    continue
+                # Process ended but the reader thread may still be draining
+                # buffered output. Keep polling until the EOF sentinel arrives.
+                continue
 
-            if line is None:
+            if line is stdout_eof:
                 # Sentinel: reader thread hit EOF (or failed). If we already
                 # consumed all output this is the normal end-of-stream signal.
                 break
@@ -1519,6 +1526,46 @@ def _load_tracker_json(json_path):
         return None, f"Failed to parse JSON file:\n{str(e)}"
 
 
+def _is_root_context(context):
+    try:
+        if context is nuke.root():
+            return True
+    except Exception:
+        pass
+    try:
+        return context.Class() == "Root"
+    except Exception:
+        return False
+
+
+def _get_parent_context(parent_node):
+    try:
+        parent = parent_node.parent()
+    except Exception:
+        parent = None
+    return parent if parent is not None else nuke.root()
+
+
+def _all_nodes_in_context(context):
+    try:
+        return nuke.allNodes(group=context)
+    except TypeError:
+        if _is_root_context(context):
+            return nuke.allNodes()
+        with context:
+            return nuke.allNodes()
+
+
+def _deselect_nodes_in_context(context):
+    for node in _all_nodes_in_context(context):
+        node.setSelected(False)
+
+
+def _create_node_in_context(context, node_class):
+    with context:
+        return nuke.createNode(node_class)
+
+
 def generate_cornerpin_node(parent_node, json_path, width, height):
     """Loads JSON tracking results, calculates bounding boxes, and generates an animated CornerPin2D node."""
     tracker_data, err = _load_tracker_json(json_path)
@@ -1550,17 +1597,15 @@ def generate_cornerpin_node(parent_node, json_path, width, height):
 
     # N4: Resolve the parent group BEFORE deselecting, then deselect inside that
     # group so nodes nested within the FaceTracker's parent are deselected too.
-    parent_group = parent_node.parent()
+    parent_group = _get_parent_context(parent_node)
 
     # Deselect all nodes to cleanly connect the new CornerPin2D node
-    for n in nuke.allNodes(parent_group):
-        n.setSelected(False)
+    _deselect_nodes_in_context(parent_group)
 
     parent_node.setSelected(True)
 
     # Create the CornerPin2D Node in the parent canvas context
-    with parent_group:
-        cornerpin = nuke.createNode('CornerPin2D')
+    cornerpin = _create_node_in_context(parent_group, 'CornerPin2D')
     cornerpin.setName(f"CornerPin_Face_{parent_node.name()}")
 
     # Set 'to' knobs (constant, represent coordinates at reference frame)
@@ -1744,16 +1789,14 @@ def generate_gridwarp_node(parent_node, json_path, width, height):
         nuke.message(payload_err)
         return False
 
-    parent_group = parent_node.parent()
-    for n in nuke.allNodes(parent_group):
-        n.setSelected(False)
+    parent_group = _get_parent_context(parent_node)
+    _deselect_nodes_in_context(parent_group)
     parent_node.setSelected(True)
 
-    with parent_group:
-        try:
-            gridwarp = nuke.createNode('GridWarp3')
-        except Exception:
-            gridwarp = nuke.createNode('GridWarp')
+    try:
+        gridwarp = _create_node_in_context(parent_group, 'GridWarp3')
+    except Exception:
+        gridwarp = _create_node_in_context(parent_group, 'GridWarp')
     gridwarp.setName(f"GridWarp_Face_{parent_node.name()}")
 
     _add_gridwarp_payload_knobs(gridwarp, payload)
@@ -1944,17 +1987,15 @@ def generate_tracker_node(parent_node, json_path, width, height):
 
     # N4: Resolve the parent group BEFORE deselecting, then deselect inside that
     # group so nodes nested within the FaceTracker's parent are deselected too.
-    parent_group = parent_node.parent()
+    parent_group = _get_parent_context(parent_node)
 
     # Deselect all nodes to cleanly connect the new Tracker4 node to our custom node
-    for n in nuke.allNodes(parent_group):
-        n.setSelected(False)
+    _deselect_nodes_in_context(parent_group)
 
     parent_node.setSelected(True)
 
     # Create the Tracker4 Node in the parent canvas context
-    with parent_group:
-        tracker = nuke.createNode('Tracker4')
+    tracker = _create_node_in_context(parent_group, 'Tracker4')
     tracker.setName(f"Tracker_Face_{parent_node.name()}")
 
     tracker_strings = []
@@ -2117,17 +2158,15 @@ def generate_roto_node(parent_node, json_path, width, height):
         # N4: Resolve the parent group BEFORE deselecting, then deselect inside
         # that group so nodes nested within the FaceTracker's parent are
         # deselected too.
-        parent_group = parent_node.parent()
+        parent_group = _get_parent_context(parent_node)
 
         # Deselect all nodes to cleanly connect the new Roto node to our custom node
-        for n in nuke.allNodes(parent_group):
-            n.setSelected(False)
+        _deselect_nodes_in_context(parent_group)
 
         parent_node.setSelected(True)
 
         # Create the Roto Node in the parent canvas context
-        with parent_group:
-            roto_node = nuke.createNode('Roto')
+        roto_node = _create_node_in_context(parent_group, 'Roto')
         roto_node.setName(f"Roto_Face_{parent_node.name()}")
 
         curves_knob = roto_node['curves']

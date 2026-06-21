@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import MagicMock, patch, mock_open
 
@@ -27,6 +28,8 @@ class TestTrackerRefinement(unittest.TestCase):
     def setUp(self):
         # Reset mock calls on each test run
         mock_nuke.reset_mock()
+        mock_nuke.createNode.side_effect = None
+        mock_nuke.allNodes.side_effect = None
         mock_nuke.frame.return_value = 1
         # Mock hygiene: ensure no stale nuke.rotopaint leaks between tests.
         # Roto tests install a fresh mock_rp each time; the cleanup removes any
@@ -41,6 +44,63 @@ class TestTrackerRefinement(unittest.TestCase):
             del mock_nuke.rotopaint
         except AttributeError:
             pass
+
+    def test_export_context_helpers_handle_root_and_group_contexts(self):
+        """Root exports must use explicit context without passing Root as filter arg."""
+        root = MagicMock()
+        root.Class.return_value = "Root"
+        root_node = MagicMock()
+        mock_nuke.root.return_value = root
+        mock_nuke.allNodes.return_value = [root_node]
+
+        nuke_tracker._deselect_nodes_in_context(root)
+
+        mock_nuke.allNodes.assert_called_once_with(group=root)
+        root_node.setSelected.assert_called_once_with(False)
+
+        mock_nuke.reset_mock()
+        root.Class.return_value = "Root"
+        created_root_node = MagicMock()
+        mock_nuke.createNode.return_value = created_root_node
+
+        self.assertIs(nuke_tracker._create_node_in_context(root, "Tracker4"), created_root_node)
+
+        root.__enter__.assert_called_once_with()
+        root.__exit__.assert_called_once()
+        mock_nuke.createNode.assert_called_once_with("Tracker4")
+
+        mock_nuke.reset_mock()
+        group = MagicMock()
+        group.Class.return_value = "Group"
+        group_node = MagicMock()
+        mock_nuke.allNodes.return_value = [group_node]
+
+        nuke_tracker._deselect_nodes_in_context(group)
+
+        mock_nuke.allNodes.assert_called_once_with(group=group)
+        group_node.setSelected.assert_called_once_with(False)
+
+    def test_create_face_tracker_node_defaults_to_root_frame_range_without_input(self):
+        """Analyze Face frame knobs should default to the project range."""
+        node = MagicMock()
+        node.input.return_value = None
+        root = MagicMock()
+        root.firstFrame.return_value = 101
+        root.lastFrame.return_value = 240
+        mock_nuke.root.return_value = root
+        mock_nuke.createNode.side_effect = [node, MagicMock(), MagicMock(), MagicMock()]
+
+        with patch("nuke_tracker._build_tracking_tab") as build_tracking_tab, \
+             patch("nuke_tracker._build_tracker_tab"), \
+             patch("nuke_tracker._build_roto_tab"), \
+             patch("nuke_tracker._build_cornerpin_tab"), \
+             patch("nuke_tracker._build_gridwarp_tab"), \
+             patch("nuke_tracker._build_settings_tab"), \
+             patch("nuke_tracker._ensure_unique_output_json"):
+            created = nuke_tracker.create_face_tracker_node()
+
+        self.assertIs(created, node)
+        build_tracking_tab.assert_called_once_with(node, 101, 240)
 
     # Default Roto knob values shared by every Roto test. Each test overrides
     # only the knobs it cares about via make_roto_knobs(**overrides).
@@ -1196,13 +1256,30 @@ class _FakeStdout:
     def __init__(self, lines):
         self._lines = list(lines)
         self._i = 0
+        self.closed = False
 
     def readline(self):
         if self._i < len(self._lines):
             line = self._lines[self._i]
             self._i += 1
             return line
+        self.closed = True
         return ""
+
+
+class _SlowFirstLineStdout(_FakeStdout):
+    """Delays first output long enough to trigger Queue.Empty in the parent loop."""
+
+    def __init__(self, lines, delay=0.2):
+        super().__init__(lines)
+        self._delay = delay
+        self._slept = False
+
+    def readline(self):
+        if not self._slept:
+            self._slept = True
+            time.sleep(self._delay)
+        return super().readline()
 
 
 class _FakeProcess:
@@ -1222,6 +1299,15 @@ class _FakeProcess:
 
     def wait(self, timeout=None):
         return self.returncode
+
+    def poll(self):
+        return self.returncode if self.stdout.closed else None
+
+
+class _SlowOutputFakeProcess(_FakeProcess):
+    def __init__(self, lines, returncode=0):
+        super().__init__(lines, returncode)
+        self.stdout = _SlowFirstLineStdout(lines)
 
 
 class TestRunTrackingOnNode(unittest.TestCase):
@@ -1329,6 +1415,24 @@ class TestRunTrackingOnNode(unittest.TestCase):
         self.assertTrue(result)
         # No backtrack -> exactly one backend pass (one subprocess spawn).
         self.assertEqual(len(procs), 1)
+
+    def test_run_tracking_pass_waits_through_quiet_stdout_period(self):
+        """A temporary lack of backend stdout must not be treated as EOF/failure."""
+        proc = _SlowOutputFakeProcess([
+            "PROGRESS: 100%",
+            "[SUCCESS] tracking complete",
+        ])
+
+        with patch("nuke_tracker.subprocess.Popen", return_value=proc):
+            result = nuke_tracker._run_tracking_passes(
+                [{"name": "Forward", "cmd": ["python", "backend.py"], "offset": 0.0, "weight": 1.0}],
+                mock_nuke.ProgressTask.return_value,
+                1,
+                1,
+            )
+
+        self.assertTrue(result)
+        self.assertFalse(mock_nuke.message.called)
 
     def test_subprocess_nonzero_exit_returns_false(self):
         node = self._make_node()
