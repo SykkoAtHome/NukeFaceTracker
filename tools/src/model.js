@@ -2,6 +2,10 @@
 // Profile data model: parent/child groups, assignment, ordering, and JSON
 // import/export/validation. Mutators call refresh() (main.js) instead of the
 // inline renderGroups();stats();draw();exportJson() tail (review #4, #14).
+// Exceptions: moveSelectedInChild and the reverse handler (view.js) keep the
+// partial tail renderGroups();draw();exportJson() (no stats()) because reorder
+// and reverse do not change assigned.size — calling refresh() would be a
+// harmless no-op but would deviate from master-exact behavior, so it is kept inline.
 
 function isRotoProfile(name=currentProfile){return name==='roto'}
 function isGridProfile(name=currentProfile){return name==='grid'}
