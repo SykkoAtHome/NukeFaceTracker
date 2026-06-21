@@ -12,7 +12,6 @@ const PROFILE_HINTS={
   roto:'Roto profile is for face-part contours. Click landmarks in outline order; use Open spline for nose bridge.',
   grid:'Grid profile builds an expandable overlay in Unwrap view. Drag grid handles onto landmarks; Symmetry moves the mirrored handle too.'
 };
-const GRID_EDGE_COLORS={top:'#ffbf4d',bottom:'#b48cff',left:'#58d68d',right:'#ff7aa2'};
 const UI_STORAGE_KEY='mediapipeLandmarkGrouper.ui';
 
 function emptyProfile(){return {parents:[],assigned:new Map(),activeChild:null}}
