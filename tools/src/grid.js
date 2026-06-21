@@ -1,7 +1,7 @@
 'use strict';
 // Grid model + geometry: the expandable overlay used in the 'grid' profile.
 // Reads UNWRAP_LAYOUT/UNWRAP_BOUNDS (geometry.js), shared state (state.js), and
-// calls makeChild/findChild (model.js) and refresh (grouper.js) at call time.
+// calls makeChild/findChild (model.js) and refresh (main.js) at call time.
 
 const GRID_LIMITS={cols:{min:2,max:33},rows:{min:2,max:32}};
 function clampInt(v,min,max,def){return Math.max(min,Math.min(max,Math.round(Number(v)||def)));}
