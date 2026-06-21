@@ -135,7 +135,10 @@ class TestNukeFaceTracker(unittest.TestCase):
 
     def test_get_landmarks_for_density_dense(self):
         """Verify dense resolver returns sequential contours and nose sparse/contour points."""
-        res = landmarks_config.get_landmarks_for_density("Dense (Contours - 149 pts)", ["Eyebrows", "Eyes"])
+        # Nose is included in the active set on purpose: Dense mode has a non-obvious
+        # branch (landmarks_config.py:258-260) that merges the SPARSE Nose landmark
+        # names alongside the Nose contours. Locking the full key set catches any drift.
+        res = landmarks_config.get_landmarks_for_density("Dense (Contours - 149 pts)", ["Eyebrows", "Eyes", "Nose"])
 
         # Check that Eyebrows contour tracks are in the resolved set
         self.assertIn("Left_Eyebrow_0", res)
@@ -147,6 +150,19 @@ class TestNukeFaceTracker(unittest.TestCase):
         self.assertIn("Left_Iris_0", res)
         self.assertIn("Right_Iris_0", res)
 
+        # Full expected key set: sparse Nose names (non-obvious inclusion) plus the
+        # indexed contour points for every contour group owned by the active parts.
+        expected_keys = set(landmarks_config.LANDMARK_GROUPS["Nose"].keys())
+        dense_contour_groups = (
+            landmarks_config.NOSE_CONTOUR_GROUP_NAMES
+            + landmarks_config.EYE_CONTOUR_GROUP_NAMES
+            + landmarks_config.EYEBROW_CONTOUR_GROUP_NAMES
+        )
+        for contour_name in dense_contour_groups:
+            for i in range(len(landmarks_config.CONTOUR_GROUPS[contour_name])):
+                expected_keys.add(f"{contour_name}_{i}")
+        self.assertEqual(set(res.keys()), expected_keys)
+
     def test_get_landmarks_for_density_surface(self):
         """Verify surface resolver returns broader facial region points without creating Roto contours."""
         res = landmarks_config.get_landmarks_for_density("Surface (Face Regions)", ["Face Shape"])
@@ -154,8 +170,13 @@ class TestNukeFaceTracker(unittest.TestCase):
         self.assertIn("Surface_Face_Shape_0", res)
         self.assertIn(323, res.values()) # Cheek region coverage
         self.assertIn(454, res.values()) # Opposite cheek region coverage
+        # No contour-style names (neither bare group names nor GroupName_N indexed
+        # points) should leak into a Surface result.
         self.assertNotIn("Face_Oval_0", res)
         self.assertFalse(any(name in landmarks_config.CONTOUR_GROUPS for name in res))
+        self.assertFalse(
+            any(name.startswith(f"{group}_") for name in res for group in landmarks_config.CONTOUR_GROUPS)
+        )
 
     def test_get_landmarks_for_density_full(self):
         """Verify full resolver returns exact partition mesh indices prefixed with Mesh_."""
@@ -166,7 +187,7 @@ class TestNukeFaceTracker(unittest.TestCase):
 
     def test_get_landmarks_for_analysis_includes_export_superset(self):
         """Analysis should record enough data for later Sparse/Dense/Surface/Full exports."""
-        res = landmarks_config.get_landmarks_for_analysis("Sparse", ["Face Shape"])
+        res = landmarks_config.get_landmarks_for_analysis()
 
         self.assertIn("Chin", res)
         self.assertIn("Face_Oval_0", res)
@@ -254,6 +275,93 @@ class TestNukeFaceTracker(unittest.TestCase):
         self.assertEqual(merged["Lips_Outer"]["2"], [[6.0, 7.0], [8.0, 9.0]])
         # Frame 3: Only backward -> [[11.0, 12.0], [13.0, 14.0]]
         self.assertEqual(merged["Lips_Outer"]["3"], [[11.0, 12.0], [13.0, 14.0]])
+
+    def test_to_nuke_xy_y_flip_and_scaling(self):
+        """Verify _to_nuke_xy flips y, scales x by width, and rounds to 3 decimals.
+
+        MediaPipe landmarks are normalized [0,1] with origin at top-left; Nuke
+        uses pixel coordinates with origin at bottom-left, so y is flipped.
+        """
+        class _FakeLM:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        width, height = 1920, 1080
+
+        # Top edge (lm.y == 0) maps to the bottom of the Nuke frame (y == height).
+        top = tracker_backend._to_nuke_xy(_FakeLM(0.0, 0.0), width, height)
+        self.assertEqual(top, [0.0, 1080.0])
+
+        # Bottom edge (lm.y == 1) maps to the top of the Nuke frame (y == 0).
+        bottom = tracker_backend._to_nuke_xy(_FakeLM(0.0, 1.0), width, height)
+        self.assertEqual(bottom, [0.0, 0.0])
+
+        # x scales by width, y is flipped and scaled by height.
+        corner = tracker_backend._to_nuke_xy(_FakeLM(1.0, 1.0), width, height)
+        self.assertEqual(corner, [1920.0, 0.0])
+
+        # Rounding to 3 decimals is preserved (0.5 * 1080 = 540.0; 0.1234 * 1920 = 236.928).
+        mid = tracker_backend._to_nuke_xy(_FakeLM(0.1234, 0.5), width, height)
+        self.assertEqual(mid, [round(0.1234 * 1920, 3), round(1080 - (0.5 * 1080), 3)])
+        self.assertEqual(mid, [236.928, 540.0])
+
+    def test_merge_results_zip_truncation(self):
+        """Lock the current zip-truncation behavior of _avg_points (tracker_backend.py:179).
+
+        When forward and backward lists differ in length, zip() silently drops the
+        trailing elements of the longer list instead of raising or padding. This
+        test documents the existing behavior so a future change is caught.
+        """
+        forward = {
+            "Lips_Outer": {
+                "2": [[1.0, 2.0], [3.0, 4.0]]  # 2 points
+            }
+        }
+        backward = {
+            "Lips_Outer": {
+                "2": [[5.0, 6.0], [7.0, 8.0], [9.0, 10.0]]  # 3 points
+            }
+        }
+        merged = tracker_backend.merge_results(forward, backward, {"Lips_Outer": [0, 1]}, {})
+
+        # Merged count matches the shorter (forward) list: the extra backward
+        # point is silently dropped. Averaging is coordinate-wise over the pairs.
+        self.assertEqual(len(merged["Lips_Outer"]["2"]), 2)
+        self.assertEqual(merged["Lips_Outer"]["2"], [[3.0, 4.0], [5.0, 6.0]])
+
+    def test_merge_results_empty_inputs(self):
+        """merge_results over empty forward/backward passes yields empty per-key frame dicts."""
+        merged = tracker_backend.merge_results({}, {}, {"Lips_Outer": [0, 1]}, {"Nose_Tip": 4})
+        self.assertEqual(merged, {"Lips_Outer": {}, "Nose_Tip": {}})
+
+    def test_merge_results_no_overlap(self):
+        """Frames present in only one pass keep that pass's value unchanged."""
+        forward = {"Lips_Outer": {"1": [[1.0, 2.0]]}}
+        backward = {"Lips_Outer": {"2": [[3.0, 4.0]]}}
+        merged = tracker_backend.merge_results(forward, backward, {"Lips_Outer": [0, 1]}, {})
+        self.assertEqual(merged["Lips_Outer"]["1"], [[1.0, 2.0]])
+        self.assertEqual(merged["Lips_Outer"]["2"], [[3.0, 4.0]])
+
+    def test_get_frame_path_negative_frame(self):
+        """Negative frames produce a leading '-': %04d of -5 -> '-005'.
+
+        TODO: The current negative handling is likely wrong for VFX frame ranges
+        (negative frame numbers are common in Nuke). Locking the existing output
+        here so a future fix is intentional; production code is out of scope.
+        """
+        path = tracker_backend.get_frame_path("D:/footage/shot_01/shot_01.####.png", -5)
+        self.assertEqual(path, "D:/footage/shot_01/shot_01.-005.png")
+
+    def test_get_frame_path_frame_zero(self):
+        """Frame 0 zero-pads to the hash width: %04d of 0 -> '0000'."""
+        path = tracker_backend.get_frame_path("D:/footage/shot_01/shot_01.####.png", 0)
+        self.assertEqual(path, "D:/footage/shot_01/shot_01.0000.png")
+
+    def test_get_frame_path_frame_wider_than_hash_count(self):
+        """A frame wider than the hash count overflows without truncation: %04d of 10000 -> '10000'."""
+        path = tracker_backend.get_frame_path("D:/footage/shot_01/shot_01.####.png", 10000)
+        self.assertEqual(path, "D:/footage/shot_01/shot_01.10000.png")
 
 if __name__ == "__main__":
     unittest.main()
