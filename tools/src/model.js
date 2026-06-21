@@ -1,6 +1,6 @@
 'use strict';
 // Profile data model: parent/child groups, assignment, ordering, and JSON
-// import/export/validation. Mutators call refresh() (grouper.js) instead of the
+// import/export/validation. Mutators call refresh() (main.js) instead of the
 // inline renderGroups();stats();draw();exportJson() tail (review #4, #14).
 
 function isRotoProfile(name=currentProfile){return name==='roto'}
