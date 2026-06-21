@@ -211,12 +211,9 @@ def set_range_to_input(node):
 def get_active_tracker_parts(node):
     active_parts = []
     knob_to_part = (
-        ("track_nose", "Nose"),
-        ("track_eyes", "Eyes"),
-        ("track_eyebrows", "Eyebrows"),
-        ("track_mouth", "Mouth"),
-        ("track_contour", "Face Shape"),
-    )
+        (knob_name, part_name)
+        for knob_name, part_name, _label, _default in landmarks_config.get_tracker_part_specs()
+    ) if landmarks_config else ()
 
     for knob_name, part_name in knob_to_part:
         try:
@@ -235,19 +232,20 @@ def get_roto_contour_knob_specs():
     return landmarks_config.ROTO_CONTOUR_KNOB_SPECS
 
 
-ROTO_CONTOUR_OPTIONS = tuple(
-    (knob_name, contour_name)
-    for knob_name, contour_name, _, _ in get_roto_contour_knob_specs()
-)
+def get_roto_contour_options():
+    return tuple(
+        (knob_name, contour_name)
+        for knob_name, contour_name, _, _ in get_roto_contour_knob_specs()
+    )
 
 def get_roto_export_contour_names():
-    return [contour_name for _, contour_name in ROTO_CONTOUR_OPTIONS]
+    return [contour_name for _, contour_name in get_roto_contour_options()]
 
 
 def get_selected_roto_contours(node):
     selected_contours = []
 
-    for knob_name, contour_name in ROTO_CONTOUR_OPTIONS:
+    for knob_name, contour_name in get_roto_contour_options():
         try:
             if node[knob_name].value():
                 selected_contours.append(contour_name)
@@ -268,6 +266,59 @@ def get_names_to_track_for_analysis(node):
     selected_names.extend(get_roto_export_contour_names())
 
     return list(dict.fromkeys(selected_names))
+
+
+def _mapping_path_from_node(node):
+    try:
+        if "mapping_json" in node.knobs():
+            value = node["mapping_json"].value()
+            if value:
+                return value
+    except Exception:
+        pass
+    return ""
+
+
+def _configure_mapping_for_node(node, show_errors=True):
+    if not landmarks_config:
+        if show_errors:
+            nuke.message("Landmarks configuration could not be imported. Please verify backend/landmarks_config.py.")
+        return False
+
+    mapping_path = _mapping_path_from_node(node)
+    if not mapping_path:
+        return True
+    try:
+        landmarks_config.load_mapping(mapping_path)
+    except Exception as e:
+        if show_errors:
+            nuke.message("Failed to load landmark mapping:\n{}\n\n{}".format(mapping_path, str(e)))
+        return False
+    return True
+
+
+def reload_mapping_from_panel(node):
+    if not _configure_mapping_for_node(node):
+        return False
+    nuke.message("Landmark mapping loaded:\n{}".format(landmarks_config.get_active_mapping_path()))
+    return True
+
+
+def _build_settings_tab(node):
+    """Build plugin-wide settings for mapping files."""
+    settings_tab = nuke.Tab_Knob("settings_tab", "Settings")
+    node.addKnob(settings_tab)
+
+    node.addKnob(nuke.Text_Knob("divider_mapping", "Landmark Mapping", ""))
+
+    mapping_knob = nuke.File_Knob("mapping_json", "Mapping JSON")
+    mapping_knob.setValue(getattr(landmarks_config, "DEFAULT_MAPPING_PATH", "").replace("\\", "/"))
+    mapping_knob.setTooltip("Profile JSON exported from tools/mediapipe_landmark_grouper.html. Leave this on default_mapping.json to use the bundled mapping.")
+    node.addKnob(mapping_knob)
+
+    reload_btn = nuke.PyScript_Knob("reload_mapping_btn", "Reload Mapping", "import nuke_tracker; nuke_tracker.reload_mapping_from_panel(nuke.thisNode())")
+    reload_btn.setFlag(nuke.STARTLINE)
+    node.addKnob(reload_btn)
 
 
 def _build_tracking_tab(node, start_frame, end_frame):
@@ -343,34 +394,19 @@ def _build_tracker_tab(node):
     tracker_tab = nuke.Tab_Knob("tracker_tab", "Tracker")
     node.addKnob(tracker_tab)
 
-    density_labels = getattr(
-        landmarks_config,
-        "TRACKER_DENSITY_LABELS",
-        ["Sparse (Standard)", "Dense (Feature Contours)", "Surface (Face Regions)", "Full (Entire Mesh & Iris - 478 pts)"]
-    )
+    density_labels = getattr(landmarks_config, "TRACKER_DENSITY_LABELS", ["Sparse", "Dense", "Full"])
     density_knob = nuke.Enumeration_Knob("landmark_density", "Landmark Density", density_labels)
-    density_knob.setTooltip("Sparse: standard facial features.\nDense: ordered feature contours for eyes, brows, lips, nose, and face oval.\nSurface: broader facial regions including cheeks, forehead, jaw, and feature surfaces.\nFull: high-fidelity mesh topology (up to 478 points).")
+    density_knob.setTooltip("Uses the sparse, dense, or full profile from the active landmark mapping JSON.")
     node.addKnob(density_knob)
 
     divider_landmarks = nuke.Text_Knob("divider_landmarks", "Select Landmarks to Track", "")
     node.addKnob(divider_landmarks)
 
-    track_nose = nuke.Boolean_Knob("track_nose", "Nose (Tip, Bridge, Alar, Nostrils)", True)
-    track_eyes = nuke.Boolean_Knob("track_eyes", "Eyes & Iris (Corners, Eyelids, Iris Centers)", True)
-    track_eyebrows = nuke.Boolean_Knob("track_eyebrows", "Eyebrows (Left & Right)", False)
-    track_mouth = nuke.Boolean_Knob("track_mouth", "Mouth (Lip contours & Corners)", True)
-    track_contour = nuke.Boolean_Knob("track_contour", "Face Contour (Oval, Chin, Forehead, Cheeks)", True)
-
-    track_eyes.setFlag(nuke.STARTLINE)
-    track_eyebrows.setFlag(nuke.STARTLINE)
-    track_mouth.setFlag(nuke.STARTLINE)
-    track_contour.setFlag(nuke.STARTLINE)
-
-    node.addKnob(track_nose)
-    node.addKnob(track_eyes)
-    node.addKnob(track_eyebrows)
-    node.addKnob(track_mouth)
-    node.addKnob(track_contour)
+    for idx, (knob_name, _part_name, label, default_value) in enumerate(landmarks_config.get_tracker_part_specs()):
+        part_knob = nuke.Boolean_Knob(knob_name, label, default_value)
+        if idx > 0:
+            part_knob.setFlag(nuke.STARTLINE)
+        node.addKnob(part_knob)
 
     info_full_mesh = nuke.Text_Knob("info_full_mesh", "", "<span style='color:#ffa500'><b>Warning:</b> Tracking all 478 landmarks will create 478 point tracks.<br>This may slow down Foundry Nuke's viewport and node properties panel.</span>")
     node.addKnob(info_full_mesh)
@@ -449,6 +485,28 @@ def _build_cornerpin_tab(node):
     node.addKnob(create_cornerpin_btn)
 
 
+def _build_gridwarp_tab(node):
+    """Build the GridWarp export tab."""
+    gridwarp_tab = nuke.Tab_Knob("gridwarp_tab", "GridWarp")
+    node.addKnob(gridwarp_tab)
+
+    node.addKnob(nuke.Text_Knob("divider_gridwarp", "GridWarp Export Settings", ""))
+
+    ref_frame_knob = nuke.Int_Knob("grid_ref_frame", "Reference Frame")
+    ref_frame_knob.setValue(int(nuke.frame()))
+    ref_frame_knob.setTooltip("Frame used to build the static destination grid. The source grid is animated from tracked landmark positions.")
+    node.addKnob(ref_frame_knob)
+
+    current_frame_btn = nuke.PyScript_Knob("set_grid_ref_current", "Current Frame", "import nuke_tracker; nuke_tracker.set_grid_ref_frame_to_current(nuke.thisNode())")
+    node.addKnob(current_frame_btn)
+
+    node.addKnob(nuke.Text_Knob("divider_gridwarp_action", "", ""))
+
+    create_gridwarp_btn = nuke.PyScript_Knob("create_gridwarp_btn", "Export GridWarp", "import nuke_tracker; nuke_tracker.generate_gridwarp_node_from_panel(nuke.thisNode())")
+    create_gridwarp_btn.setFlag(nuke.STARTLINE)
+    node.addKnob(create_gridwarp_btn)
+
+
 def _build_knob_changed_script():
     """Return the multi-line knobChanged callback script that drives dynamic knob
     visibility (anchor_stiffness / info_full_mesh / output_json)."""
@@ -496,11 +554,13 @@ def create_face_tracker_node():
     if input_node:
         start_frame, end_frame = _resolve_input_frame_range(input_node)
 
-    # Build the four tabs in order, then attach the dynamic knobChanged script.
+    # Build the tabs in order, then attach the dynamic knobChanged script.
+    _build_settings_tab(node)
     _build_tracking_tab(node, start_frame, end_frame)
     _build_tracker_tab(node)
     _build_roto_tab(node)
     _build_cornerpin_tab(node)
+    _build_gridwarp_tab(node)
 
     # Dynamic visibility callback script set on the knobChanged callback
     node['knobChanged'].setValue(_build_knob_changed_script())
@@ -555,9 +615,8 @@ def _validate_tracking_inputs(node):
         nuke.message("Please specify a valid path for the output JSON file.")
         return None
 
-    # Resolve all possible landmarks and contours to track everything in one go
-    if not landmarks_config:
-        nuke.message("Landmarks configuration could not be imported. Please verify backend/landmarks_config.py.")
+    # Resolve all possible landmarks and contours from the active mapping.
+    if not _configure_mapping_for_node(node):
         return None
 
     selected_names = get_names_to_track_for_analysis(node)
@@ -581,6 +640,7 @@ def _validate_tracking_inputs(node):
         'start_frame': start_frame,
         'end_frame': end_frame,
         'output_json': output_json,
+        'mapping_json': _mapping_path_from_node(node),
         'landmarks_str': landmarks_str,
         'width': width,
         'height': height,
@@ -633,7 +693,7 @@ def _build_backend_command(params):
     except Exception:
         pass
 
-    return [
+    command = [
         params['python_exe'],
         backend_script,
         "--input", params['temp_file_pattern'],
@@ -648,6 +708,10 @@ def _build_backend_command(params):
         "--min-det-confidence", str(min_det_conf),
         "--min-track-confidence", str(min_track_conf),
     ]
+    if params.get('mapping_json'):
+        landmark_arg_index = command.index("--landmarks")
+        command[landmark_arg_index:landmark_arg_index] = ["--mapping", params['mapping_json']]
+    return command
 
 
 def _render_input_stream(node, start_frame, end_frame, temp_file_pattern):
@@ -1292,6 +1356,63 @@ def interpolate_missing_frames(frame_data, start_frame, end_frame):
     return new_frame_data
 
 
+def _filter_existing_keyframes(frame_data, start_frame, end_frame, value_predicate):
+    """Return only authored keyframes in range; do not synthesize missing frames."""
+    filtered = {}
+    for frame, value in frame_data.items():
+        try:
+            frame_int = int(frame)
+        except (TypeError, ValueError):
+            continue
+        if frame_int < start_frame or frame_int > end_frame:
+            continue
+        if value_predicate(value):
+            filtered[str(frame_int)] = value
+    return filtered
+
+
+def _is_contour_frame_value(value):
+    return (
+        isinstance(value, (list, tuple))
+        and bool(value)
+        and all(_is_tracker_point_value(point) for point in value)
+    )
+
+
+def _average_named_points(interpolated_tracks, frame_key, name_fragment):
+    pts = []
+    for name, data in interpolated_tracks.items():
+        if name_fragment not in name:
+            continue
+        val = data.get(frame_key)
+        if _is_tracker_point_value(val):
+            pts.append(val)
+    if not pts:
+        return None
+    return [
+        sum(p[0] for p in pts) / len(pts),
+        sum(p[1] for p in pts) / len(pts),
+    ]
+
+
+def _resolve_eye_centers(interpolated_tracks, frame_key):
+    right_inner = interpolated_tracks.get("Right_Eye_Inner", {}).get(frame_key)
+    right_outer = interpolated_tracks.get("Right_Eye_Outer", {}).get(frame_key)
+    left_inner = interpolated_tracks.get("Left_Eye_Inner", {}).get(frame_key)
+    left_outer = interpolated_tracks.get("Left_Eye_Outer", {}).get(frame_key)
+
+    if right_inner and right_outer and left_inner and left_outer:
+        right_eye = [(right_inner[0] + right_outer[0]) / 2.0, (right_inner[1] + right_outer[1]) / 2.0]
+        left_eye = [(left_inner[0] + left_outer[0]) / 2.0, (left_inner[1] + left_outer[1]) / 2.0]
+        return right_eye, left_eye
+
+    left_eye = _average_named_points(interpolated_tracks, frame_key, "left_eye")
+    right_eye = _average_named_points(interpolated_tracks, frame_key, "right_eye")
+    if left_eye and right_eye:
+        return right_eye, left_eye
+    return None, None
+
+
 def calculate_cornerpin_data(tracker_data, start_frame, end_frame, width=1920, height=1080):
     """Calculates the 4 corner points [BL, BR, TR, TL] of the oriented bounding box of ALL landmarks
     for each frame from start_frame to end_frame, taking face rotation into account.
@@ -1300,20 +1421,24 @@ def calculate_cornerpin_data(tracker_data, start_frame, end_frame, width=1920, h
         dict: mapping frame_number (int) -> [[bl_x, bl_y], [br_x, br_y], [tr_x, tr_y], [tl_x, tl_y]]
     """
     import math
-    interpolated_tracks = {}
+    keyed_tracks = {}
     for name, data in tracker_data.items():
         if not data:
             continue
-        # interpolate_missing_frames detects the single-point vs list-of-points
-        # format internally, so both contour groups and single landmarks share
-        # one code path here.
-        interpolated_tracks[name] = interpolate_missing_frames(data, start_frame, end_frame)
+        filtered = _filter_existing_keyframes(
+            data,
+            start_frame,
+            end_frame,
+            lambda value: _is_tracker_point_value(value) or _is_contour_frame_value(value),
+        )
+        if filtered:
+            keyed_tracks[name] = filtered
 
     bbox_per_frame = {}
     for frame in range(start_frame, end_frame + 1):
         f_str = str(frame)
         pts = []
-        for name, data in interpolated_tracks.items():
+        for name, data in keyed_tracks.items():
             val = data.get(f_str)
             if val:
                 if isinstance(val[0], list):
@@ -1325,14 +1450,8 @@ def calculate_cornerpin_data(tracker_data, start_frame, end_frame, width=1920, h
         if pts:
             # Calculate rotation angle based on eye line orientation
             theta = 0.0
-            right_inner = interpolated_tracks.get("Right_Eye_Inner", {}).get(f_str)
-            right_outer = interpolated_tracks.get("Right_Eye_Outer", {}).get(f_str)
-            left_inner = interpolated_tracks.get("Left_Eye_Inner", {}).get(f_str)
-            left_outer = interpolated_tracks.get("Left_Eye_Outer", {}).get(f_str)
-
-            if right_inner and right_outer and left_inner and left_outer:
-                right_eye = [(right_inner[0] + right_outer[0]) / 2.0, (right_inner[1] + right_outer[1]) / 2.0]
-                left_eye = [(left_inner[0] + left_outer[0]) / 2.0, (left_inner[1] + left_outer[1]) / 2.0]
+            right_eye, left_eye = _resolve_eye_centers(keyed_tracks, f_str)
+            if right_eye and left_eye:
                 dx = left_eye[0] - right_eye[0]
                 dy = left_eye[1] - right_eye[1]
                 theta = math.atan2(dy, dx)
@@ -1380,8 +1499,6 @@ def calculate_cornerpin_data(tracker_data, start_frame, end_frame, width=1920, h
                 corners_orig.append([round(ox, 3), round(oy, 3)])
 
             bbox_per_frame[frame] = corners_orig
-        else:
-            bbox_per_frame[frame] = [[0, 0], [width, 0], [width, height], [0, height]]
 
     return bbox_per_frame
 
@@ -1420,10 +1537,16 @@ def generate_cornerpin_node(parent_node, json_path, width, height):
 
     # Calculate corner pin data per frame (returns BL, BR, TR, TL points per frame)
     bbox_per_frame = calculate_cornerpin_data(tracker_data, start_frame, end_frame, width, height)
+    if not bbox_per_frame:
+        nuke.message("CornerPin export needs at least one frame with detected landmarks.")
+        return False
 
     # Resolve bounding box on the reference frame (clamped to available range)
     ref_clamped = max(start_frame, min(end_frame, ref_frame))
-    ref_bbox = bbox_per_frame.get(ref_clamped, [[0, 0], [width, 0], [width, height], [0, height]])
+    ref_bbox = bbox_per_frame.get(ref_clamped)
+    if ref_bbox is None:
+        nuke.message("CornerPin reference frame {} has no detected landmarks. Choose a reference frame with tracking data.".format(ref_clamped))
+        return False
 
     # N4: Resolve the parent group BEFORE deselecting, then deselect inside that
     # group so nodes nested within the FaceTracker's parent are deselected too.
@@ -1470,6 +1593,181 @@ def generate_cornerpin_node(parent_node, json_path, width, height):
 
     parent_node.setSelected(True)
     cornerpin.setSelected(True)
+    return True
+
+
+def _grid_points_from_mapping():
+    grid_mapping = landmarks_config.get_grid_mapping() if landmarks_config else {}
+    rows = int(grid_mapping.get("rows", 0) or 0)
+    cols = int(grid_mapping.get("cols", 0) or 0)
+    points = []
+
+    for point in grid_mapping.get("points", []):
+        if not isinstance(point, dict) or point.get("id") is None:
+            continue
+        try:
+            row = int(point.get("row"))
+            col = int(point.get("col"))
+        except (TypeError, ValueError):
+            continue
+        points.append({
+            "row": row,
+            "col": col,
+            "id": int(point.get("id")),
+            "track": landmarks_config.grid_track_name(row, col),
+        })
+
+    points.sort(key=lambda item: (item["row"], item["col"]))
+    return rows, cols, points
+
+
+def _grid_payload_from_tracks(tracker_data, start_frame, end_frame, ref_frame):
+    rows, cols, mapping_points = _grid_points_from_mapping()
+    if not rows or not cols or not mapping_points:
+        return None, "The active mapping does not contain a usable grid profile."
+
+    animated = {}
+    missing = []
+    for point in mapping_points:
+        track_data = tracker_data.get(point["track"])
+        if not track_data:
+            missing.append(point["track"])
+            continue
+        keyed_data = _filter_existing_keyframes(track_data, start_frame, end_frame, _is_tracker_point_value)
+        if not keyed_data:
+            missing.append(point["track"])
+            continue
+        animated[point["track"]] = keyed_data
+
+    if missing:
+        return None, "Grid tracks are missing from the tracking JSON. Re-run Track Face after selecting this mapping.\n\nMissing example: {}".format(missing[0])
+
+    ref_clamped = max(start_frame, min(end_frame, ref_frame))
+    reference_points = []
+    frames = {}
+
+    for point in mapping_points:
+        track_name = point["track"]
+        ref_value = animated[track_name].get(str(ref_clamped))
+        if not _is_tracker_point_value(ref_value):
+            return None, "Grid reference frame {} is missing point {}.".format(ref_clamped, track_name)
+        reference_points.append({
+            "row": point["row"],
+            "col": point["col"],
+            "id": point["id"],
+            "x": ref_value[0],
+            "y": ref_value[1],
+        })
+
+    keyed_frame_sets = [set(data.keys()) for data in animated.values()]
+    keyed_frames = sorted(set.intersection(*keyed_frame_sets), key=lambda value: int(value)) if keyed_frame_sets else []
+    for frame_key in keyed_frames:
+        frame_points = []
+        for point in mapping_points:
+            value = animated[point["track"]][frame_key]
+            frame_points.append({
+                "row": point["row"],
+                "col": point["col"],
+                "x": value[0],
+                "y": value[1],
+            })
+        frames[frame_key] = frame_points
+
+    if not frames:
+        return None, "GridWarp export needs at least one frame with a complete detected grid."
+
+    return {
+        "rows": rows,
+        "cols": cols,
+        "reference_frame": ref_clamped,
+        "destination": reference_points,
+        "source": frames,
+    }, None
+
+
+def _add_gridwarp_payload_knobs(gridwarp, payload):
+    """Attach the generated payload for versions where GridWarp grid knobs differ."""
+    try:
+        gridwarp.addKnob(nuke.Tab_Knob("facetracker_grid_tab", "FaceTracker Grid"))
+        payload_knob = nuke.String_Knob("facetracker_grid_payload", "Grid Payload")
+        payload_knob.setValue(json.dumps(payload, separators=(",", ":")))
+        gridwarp.addKnob(payload_knob)
+    except Exception:
+        pass
+
+
+def _try_populate_gridwarp_knobs(gridwarp, payload):
+    """Best-effort population for Nuke builds exposing scriptable grid knobs."""
+    knobs = gridwarp.knobs()
+    for rows_name in ("rows", "grid_rows", "source_grid_rows"):
+        if rows_name in knobs:
+            try:
+                gridwarp[rows_name].setValue(payload["rows"])
+            except Exception:
+                pass
+    for cols_name in ("columns", "cols", "grid_columns", "source_grid_columns"):
+        if cols_name in knobs:
+            try:
+                gridwarp[cols_name].setValue(payload["cols"])
+            except Exception:
+                pass
+
+    populated = False
+    for knob_name in ("facetracker_grid_payload", "grid_payload"):
+        if knob_name in knobs:
+            try:
+                gridwarp[knob_name].setValue(json.dumps(payload, separators=(",", ":")))
+                populated = True
+            except Exception:
+                pass
+    return populated
+
+
+def generate_gridwarp_node(parent_node, json_path, width, height):
+    """Build a GridWarp node from the active grid mapping and tracked landmarks."""
+    tracker_data, err = _load_tracker_json(json_path)
+    if err is not None:
+        nuke.message(err)
+        return False
+
+    try:
+        start_frame = int(parent_node['start_frame'].value())
+        end_frame = int(parent_node['end_frame'].value())
+        ref_frame = int(parent_node['grid_ref_frame'].value())
+    except Exception:
+        start_frame = 1
+        end_frame = 100
+        ref_frame = 1
+
+    payload, payload_err = _grid_payload_from_tracks(tracker_data, start_frame, end_frame, ref_frame)
+    if payload_err:
+        nuke.message(payload_err)
+        return False
+
+    parent_group = parent_node.parent()
+    for n in nuke.allNodes(parent_group):
+        n.setSelected(False)
+    parent_node.setSelected(True)
+
+    with parent_group:
+        try:
+            gridwarp = nuke.createNode('GridWarp3')
+        except Exception:
+            gridwarp = nuke.createNode('GridWarp')
+    gridwarp.setName(f"GridWarp_Face_{parent_node.name()}")
+
+    _add_gridwarp_payload_knobs(gridwarp, payload)
+    _try_populate_gridwarp_knobs(gridwarp, payload)
+
+    try:
+        gridwarp['label'].setValue("Ref Frame: {}\n{} x {} FaceTracker grid".format(
+            payload["reference_frame"], payload["cols"], payload["rows"]
+        ))
+    except Exception:
+        pass
+
+    parent_node.setSelected(True)
+    gridwarp.setSelected(True)
     return True
 
 
@@ -1612,13 +1910,16 @@ def generate_tracker_node(parent_node, json_path, width, height):
     resolved_tracks = _resolve_active_tracker_tracks(tracker_data, selected_landmarks)
     active_tracks = {}
     for name, data in resolved_tracks.items():
-        interpolated_data = interpolate_missing_frames(data, start_frame, end_frame)
-        if interpolated_data:
-            active_tracks[name] = interpolated_data
+        keyed_data = _filter_existing_keyframes(data, start_frame, end_frame, _is_tracker_point_value)
+        if keyed_data:
+            active_tracks[name] = keyed_data
 
     # Inject corner pin tracker points if requested
     if parent_node['export_cornerpin_tracker'].value():
         bbox_per_frame = calculate_cornerpin_data(tracker_data, start_frame, end_frame, width, height)
+        if not bbox_per_frame:
+            nuke.message("Corner Pin tracker export needs at least one frame with detected landmarks.")
+            return False
 
         # Build 4 separate tracking datasets
         corner_bl = {}
@@ -1781,9 +2082,9 @@ def generate_roto_node(parent_node, json_path, width, height):
         if name in selected_contours and data:
             first_val = list(data.values())[0]
             if isinstance(first_val[0], list):
-                interpolated_data = interpolate_missing_frames(data, start_frame, end_frame)
-                if interpolated_data:
-                    active_contours[name] = interpolated_data
+                keyed_data = _filter_existing_keyframes(data, start_frame, end_frame, _is_contour_frame_value)
+                if keyed_data:
+                    active_contours[name] = keyed_data
 
     if not active_contours:
         nuke.message("Please select at least one contour group to export, or ensure you have tracked first.")
@@ -1961,6 +2262,9 @@ def _resolve_input_dimensions(node):
 def _export_from_panel(node, builder):
     """Shared export-from-panel flow: resolve the output JSON path, validate it,
     resolve input dimensions, then delegate to ``builder(node, json_path, w, h)``."""
+    if not _configure_mapping_for_node(node):
+        return False
+
     json_path = _resolve_output_json_path(node)
     if not json_path:
         nuke.message("Please specify a valid output JSON file path first.")
@@ -1984,8 +2288,18 @@ def generate_cornerpin_node_from_panel(node):
     return _export_from_panel(node, generate_cornerpin_node)
 
 
+def generate_gridwarp_node_from_panel(node):
+    """Callback triggered from the GridWarp tab. Loads JSON and builds the GridWarp node."""
+    return _export_from_panel(node, generate_gridwarp_node)
+
+
 def set_ref_frame_to_current(node):
     """Sets the 'ref_frame' knob to the current frame on the timeline."""
     node['ref_frame'].setValue(int(nuke.frame()))
+
+
+def set_grid_ref_frame_to_current(node):
+    """Sets the GridWarp reference frame knob to the current frame."""
+    node['grid_ref_frame'].setValue(int(nuke.frame()))
 
 

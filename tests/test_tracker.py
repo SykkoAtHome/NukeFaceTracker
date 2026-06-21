@@ -14,46 +14,45 @@ class TestNukeFaceTracker(unittest.TestCase):
         """Test retrieving all landmarks when no names are specified."""
         res = landmarks_config.get_landmarks_by_names([])
         self.assertEqual(len(res), len(landmarks_config.ALL_LANDMARKS))
-        self.assertIn("Nose_Tip", res)
-        self.assertEqual(res["Nose_Tip"], 4)
+        self.assertIn("sparse_nose_tip", res)
+        self.assertEqual(res["sparse_nose_tip"], 4)
 
     def test_get_landmarks_by_names_specific(self):
         """Test retrieving specific landmarks by their names."""
-        names = ["Nose_Tip", "Left_Eye_Outer"]
+        names = ["sparse_nose_tip", "dense_eyes_left_eye_0"]
         res = landmarks_config.get_landmarks_by_names(names)
         self.assertEqual(len(res), 2)
-        self.assertEqual(res["Nose_Tip"], 4)
-        self.assertEqual(res["Left_Eye_Outer"], 263)
+        self.assertEqual(res["sparse_nose_tip"], 4)
+        self.assertEqual(res["dense_eyes_left_eye_0"], 33)
 
     def test_get_landmarks_by_names_mesh_and_contour(self):
         """Test dynamic mesh and contour landmarks name resolution."""
-        names = ["Mesh_152", "Face_Oval_0", "Lips_Outer_1", "Invalid_Name", "Mesh_500", "Face_Oval_99"]
+        names = ["Mesh_152", "roto_mouth_lip_upper_1", "Invalid_Name", "Mesh_500", "roto_mouth_lip_upper_99"]
         res = landmarks_config.get_landmarks_by_names(names)
-        self.assertEqual(len(res), 3)
+        self.assertEqual(len(res), 2)
         self.assertEqual(res["Mesh_152"], 152)
-        self.assertEqual(res["Face_Oval_0"], 10) # 10 is index 0 in Face_Oval
-        self.assertEqual(res["Lips_Outer_1"], 185) # 185 is index 1 in Lips_Outer
+        self.assertEqual(res["roto_mouth_lip_upper_1"], 267)
 
-    def test_get_landmarks_by_names_surface(self):
-        """Test dynamic surface landmark name resolution."""
-        res = landmarks_config.get_landmarks_by_names(["Surface_Face_Shape_0", "Surface_Nose_0"])
-        self.assertEqual(res["Surface_Face_Shape_0"], landmarks_config.FACE_SHAPE_SURFACE_INDICES[0])
-        self.assertEqual(res["Surface_Nose_0"], landmarks_config.NOSE_SURFACE_INDICES[0])
+    def test_get_landmarks_by_names_grid(self):
+        """Test grid landmark name resolution."""
+        res = landmarks_config.get_landmarks_by_names(["grid_r01_c01", "grid_r10_c09"])
+        self.assertEqual(res["grid_r01_c01"], 54)
+        self.assertEqual(res["grid_r10_c09"], 365)
 
     def test_get_contour_groups_by_names_all(self):
         """Test retrieving all contour groups when no names are specified."""
         res = landmarks_config.get_contour_groups_by_names([])
         self.assertEqual(len(res), len(landmarks_config.CONTOUR_GROUPS))
-        self.assertIn("Face_Oval", res)
-        self.assertIn("Lips_Outer", res)
+        self.assertIn("roto_face_chin", res)
+        self.assertIn("roto_mouth_lip_upper", res)
 
     def test_get_contour_groups_by_names_specific(self):
         """Test retrieving specific contour groups by name."""
-        names = ["Lips_Outer", "Left_Eye"]
+        names = ["roto_mouth_lip_upper", "roto_eyes_left_eye"]
         res = landmarks_config.get_contour_groups_by_names(names)
         self.assertEqual(len(res), 2)
-        self.assertEqual(res["Lips_Outer"], landmarks_config.CONTOUR_GROUPS["Lips_Outer"])
-        self.assertEqual(res["Left_Eye"], landmarks_config.CONTOUR_GROUPS["Left_Eye"])
+        self.assertEqual(res["roto_mouth_lip_upper"], landmarks_config.CONTOUR_GROUPS["roto_mouth_lip_upper"])
+        self.assertEqual(res["roto_eyes_left_eye"], landmarks_config.CONTOUR_GROUPS["roto_eyes_left_eye"])
 
     def test_get_frame_path_hash_pattern(self):
         """Test converting Nuke-style hash patterns (e.g. ####) to frame file path."""
@@ -81,18 +80,18 @@ class TestNukeFaceTracker(unittest.TestCase):
 
     def test_nose_alar_orientations(self):
         """Verify person's left is 358 (screen right) and person's right is 129 (screen left)."""
-        self.assertEqual(landmarks_config.LANDMARK_GROUPS["Nose"]["Nose_Left_Alar"], 358)
-        self.assertEqual(landmarks_config.LANDMARK_GROUPS["Nose"]["Nose_Right_Alar"], 129)
+        self.assertEqual(landmarks_config.LANDMARK_GROUPS["nose"]["sparse_nose_right_ala"], 358)
+        self.assertEqual(landmarks_config.LANDMARK_GROUPS["nose"]["sparse_nose_left_ala"], 129)
 
     def test_nose_bridge_scalar_and_contour_do_not_collide(self):
         """Verify sparse Nose_Bridge and dense nose bridge contour use distinct JSON keys."""
-        self.assertEqual(landmarks_config.LANDMARK_GROUPS["Nose"]["Nose_Bridge"], 168)
-        self.assertNotIn("Nose_Bridge", landmarks_config.CONTOUR_GROUPS)
-        self.assertIn("Nose_Bridge_Contour", landmarks_config.CONTOUR_GROUPS)
+        self.assertEqual(landmarks_config.LANDMARK_GROUPS["nose"]["sparse_nose_bridge"], 168)
+        self.assertNotIn("sparse_nose_bridge", landmarks_config.CONTOUR_GROUPS)
+        self.assertIn("roto_nose_bridge", landmarks_config.CONTOUR_GROUPS)
 
         res = landmarks_config.get_landmarks_for_density("Dense (Contours - 149 pts)", ["Nose"])
-        self.assertEqual(res["Nose_Bridge"], 168)
-        self.assertEqual(res["Nose_Bridge_Contour_0"], 6)
+        self.assertEqual(res["dense_nose_bridge_0"], 168)
+        self.assertEqual(res["dense_nose_bridge_1"], 197)
 
     def test_mesh_partition_properties(self):
         """Verify that the 478 landmark mesh is partitioned cleanly with no overlaps or missing indices."""
@@ -127,11 +126,12 @@ class TestNukeFaceTracker(unittest.TestCase):
     def test_get_landmarks_for_density_sparse(self):
         """Verify sparse resolver returns standard landmark groups for active facial parts."""
         res = landmarks_config.get_landmarks_for_density("Sparse (Standard - 31 pts)", ["Nose", "Eyebrows"])
-        # Expected keys should be exactly keys of landmarks_config.LANDMARK_GROUPS["Nose"] and ["Eyebrows"]
-        expected_keys = set(landmarks_config.LANDMARK_GROUPS["Nose"].keys()) | set(landmarks_config.LANDMARK_GROUPS["Eyebrows"].keys())
+        # Expected keys should be exactly keys of the sparse nose and eyes-authored eyebrow groups.
+        expected_keys = set(landmarks_config.LANDMARK_GROUPS["nose"].keys())
+        expected_keys.update(landmarks_config.LANDMARK_GROUPS["eyebrows"].keys())
         self.assertEqual(set(res.keys()), expected_keys)
-        self.assertEqual(res["Nose_Tip"], 4)
-        self.assertEqual(res["Left_Eyebrow_Outer"], 300)
+        self.assertEqual(res["sparse_nose_tip"], 4)
+        self.assertEqual(res["sparse_eyes_left_eyebrow_1"], 107)
 
     def test_get_landmarks_for_density_dense(self):
         """Verify dense resolver returns sequential contours and nose sparse/contour points."""
@@ -141,62 +141,40 @@ class TestNukeFaceTracker(unittest.TestCase):
         res = landmarks_config.get_landmarks_for_density("Dense (Contours - 149 pts)", ["Eyebrows", "Eyes", "Nose"])
 
         # Check that Eyebrows contour tracks are in the resolved set
-        self.assertIn("Left_Eyebrow_0", res)
-        self.assertIn("Right_Eyebrow_0", res)
+        self.assertIn("dense_eyes_left_eyebrow_0", res)
+        self.assertIn("dense_eyes_right_eyebrow_0", res)
 
         # Check that Eyes and Irises contour tracks are in the resolved set
-        self.assertIn("Left_Eye_0", res)
-        self.assertIn("Right_Eye_0", res)
-        self.assertIn("Left_Iris_0", res)
-        self.assertIn("Right_Iris_0", res)
+        self.assertIn("dense_eyes_left_eye_0", res)
+        self.assertIn("dense_eyes_right_eye_0", res)
+        self.assertIn("dense_eyes_left_iris", res)
+        self.assertIn("dense_eyes_right_iris", res)
 
         # Full expected key set: sparse Nose names (non-obvious inclusion) plus the
         # indexed contour points for every contour group owned by the active parts.
-        expected_keys = set(landmarks_config.LANDMARK_GROUPS["Nose"].keys())
-        dense_contour_groups = (
-            landmarks_config.NOSE_CONTOUR_GROUP_NAMES
-            + landmarks_config.EYE_CONTOUR_GROUP_NAMES
-            + landmarks_config.EYEBROW_CONTOUR_GROUP_NAMES
-        )
-        for contour_name in dense_contour_groups:
-            for i in range(len(landmarks_config.CONTOUR_GROUPS[contour_name])):
-                expected_keys.add(f"{contour_name}_{i}")
+        expected_keys = set()
+        for part in ("nose", "eyes", "eyebrows"):
+            expected_keys.update(landmarks_config.PROFILE_LANDMARKS["dense"][part].keys())
         self.assertEqual(set(res.keys()), expected_keys)
-
-    def test_get_landmarks_for_density_surface(self):
-        """Verify surface resolver returns broader facial region points without creating Roto contours."""
-        res = landmarks_config.get_landmarks_for_density("Surface (Face Regions)", ["Face Shape"])
-
-        self.assertIn("Surface_Face_Shape_0", res)
-        self.assertIn(323, res.values()) # Cheek region coverage
-        self.assertIn(454, res.values()) # Opposite cheek region coverage
-        # No contour-style names (neither bare group names nor GroupName_N indexed
-        # points) should leak into a Surface result.
-        self.assertNotIn("Face_Oval_0", res)
-        self.assertFalse(any(name in landmarks_config.CONTOUR_GROUPS for name in res))
-        self.assertFalse(
-            any(name.startswith(f"{group}_") for name in res for group in landmarks_config.CONTOUR_GROUPS)
-        )
 
     def test_get_landmarks_for_density_full(self):
-        """Verify full resolver returns exact partition mesh indices prefixed with Mesh_."""
+        """Verify full resolver returns authored full profile points."""
         res = landmarks_config.get_landmarks_for_density("Full (Entire Mesh & Iris - 478 pts)", ["Eyebrows"])
-        expected_keys = {f"Mesh_{idx}" for idx in landmarks_config.EYEBROWS_MESH_INDICES}
+        expected_keys = set(landmarks_config.PROFILE_LANDMARKS["full"]["eyebrows"].keys())
         self.assertEqual(set(res.keys()), expected_keys)
-        self.assertEqual(res["Mesh_70"], 70)
+        self.assertEqual(res["full_eyebrows_right_eyebrow_7"], 70)
 
     def test_get_landmarks_for_analysis_includes_export_superset(self):
         """Analysis should record enough data for later Sparse/Dense/Surface/Full exports."""
         res = landmarks_config.get_landmarks_for_analysis()
 
-        self.assertIn("Chin", res)
-        self.assertIn("Face_Oval_0", res)
-        self.assertIn("Surface_Face_Shape_0", res)
-        self.assertIn("Mesh_152", res)
-        self.assertIn("Nose_Tip", res)
-        self.assertIn("Left_Eye_0", res)
-        self.assertIn("Surface_Nose_0", res)
-        self.assertIn("Mesh_477", res)
+        self.assertIn("sparse_face_chin", res)
+        self.assertIn("dense_face_oval_0", res)
+        self.assertIn("full_face_oval_14", res)
+        self.assertIn("sparse_nose_tip", res)
+        self.assertIn("dense_eyes_left_eye_0", res)
+        self.assertIn("grid_r01_c01", res)
+        self.assertIn("full_eyes_right_iris_4", res)
 
     def test_roto_contours_are_explicit_subset_of_contour_groups(self):
         """Roto should remain limited to spline-friendly contour groups, not surface point clouds."""
@@ -204,14 +182,14 @@ class TestNukeFaceTracker(unittest.TestCase):
 
         self.assertTrue(roto_names)
         self.assertTrue(set(roto_names).issubset(set(landmarks_config.CONTOUR_GROUPS.keys())))
-        self.assertNotIn("Left_Cheek_Bone", roto_names)
-        self.assertNotIn("Right_Cheek_Bone", roto_names)
+        self.assertNotIn("dense_face_left_cheek_0", roto_names)
+        self.assertNotIn("dense_face_right_cheek_0", roto_names)
         self.assertFalse(any(name.startswith("Surface_") for name in roto_names))
 
     def test_iris_contours_exclude_centers(self):
         """Verify that Left_Iris and Right_Iris contour lists have exactly 4 points and do not include the centers."""
-        left_iris_contour = landmarks_config.CONTOUR_GROUPS["Left_Iris"]
-        right_iris_contour = landmarks_config.CONTOUR_GROUPS["Right_Iris"]
+        left_iris_contour = landmarks_config.CONTOUR_GROUPS["roto_eyes_left_iris"]
+        right_iris_contour = landmarks_config.CONTOUR_GROUPS["roto_eyes_right_iris"]
 
         self.assertEqual(len(left_iris_contour), 4)
         self.assertEqual(len(right_iris_contour), 4)
@@ -222,15 +200,15 @@ class TestNukeFaceTracker(unittest.TestCase):
 
     def test_nostril_contours(self):
         """Verify that Left and Right Nostril contours contain the standard 6 points defining the nostrils."""
-        left_nostril = landmarks_config.CONTOUR_GROUPS["Nose_Left_Nostril"]
-        right_nostril = landmarks_config.CONTOUR_GROUPS["Nose_Right_Nostril"]
+        left_nostril = landmarks_config.CONTOUR_GROUPS["roto_nose_left_nostril"]
+        right_nostril = landmarks_config.CONTOUR_GROUPS["roto_nose_right_nostril"]
 
         self.assertEqual(len(left_nostril), 6)
         self.assertEqual(len(right_nostril), 6)
 
         # Verify standard landmarks are in the sets
-        self.assertTrue(set([250, 290, 305, 309, 392, 458]).issubset(set(left_nostril)))
-        self.assertTrue(set([20, 60, 75, 79, 166, 238]).issubset(set(right_nostril)))
+        self.assertTrue(set([20, 60, 75, 79, 166, 238]).issubset(set(left_nostril)))
+        self.assertTrue(set([250, 290, 305, 309, 392, 458]).issubset(set(right_nostril)))
 
     def test_merge_results_averaging_and_gap_patching(self):
         """Test merge_results for landmarks and contours averaging and gap patching."""

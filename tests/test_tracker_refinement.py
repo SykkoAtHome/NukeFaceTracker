@@ -45,18 +45,7 @@ class TestTrackerRefinement(unittest.TestCase):
     # Default Roto knob values shared by every Roto test. Each test overrides
     # only the knobs it cares about via make_roto_knobs(**overrides).
     _ROTO_KNOB_DEFAULTS = {
-        'roto_oval': False,
-        'roto_nose_bridge': False,
-        'roto_left_nostril': False,
-        'roto_right_nostril': False,
-        'roto_lips_outer': False,
-        'roto_lips_inner': False,
-        'roto_left_eye': False,
-        'roto_right_eye': False,
-        'roto_left_iris': False,
-        'roto_right_iris': False,
-        'roto_left_eyebrow': False,
-        'roto_right_eyebrow': False,
+        **{knob_name: False for knob_name, _contour_name, _label, _default in nuke_tracker.get_roto_contour_knob_specs()},
         'roto_bezier': False,
         'start_frame': 1,
         'end_frame': 1,
@@ -102,9 +91,9 @@ class TestTrackerRefinement(unittest.TestCase):
         names = nuke_tracker.get_names_to_track_for_analysis(mock_node)
 
         self.assertTrue(set(nuke_tracker.get_roto_export_contour_names()).issubset(set(names)))
-        self.assertIn("Lips_Inner", names)
-        self.assertIn("Left_Eye", names)
-        self.assertIn("Nose_Left_Nostril", names)
+        self.assertIn("roto_mouth_mouth_inner", names)
+        self.assertIn("roto_eyes_left_eye", names)
+        self.assertIn("roto_nose_left_nostril", names)
 
     def test_analysis_tracks_tracker_export_superset(self):
         """Tracking stores enough tracker points for later Surface and Full exports."""
@@ -134,10 +123,10 @@ class TestTrackerRefinement(unittest.TestCase):
 
         names = nuke_tracker.get_names_to_track_for_analysis(mock_node)
 
-        self.assertIn("Chin", names)
-        self.assertIn("Face_Oval_0", names)
-        self.assertIn("Surface_Face_Shape_0", names)
-        self.assertIn("Mesh_152", names)
+        self.assertIn("sparse_face_chin", names)
+        self.assertIn("dense_face_oval_0", names)
+        self.assertIn("full_face_oval_14", names)
+        self.assertIn("grid_r01_c01", names)
 
     class _FakeAnimCurve:
         def __init__(self):
@@ -322,11 +311,11 @@ class TestTrackerRefinement(unittest.TestCase):
 
         # 2. Mock open/json loading of files so generate_tracker_node reads our dummy tracker data
         dummy_data = {
-            "Nose_Tip": {"1": [10.0, 20.0]},
-            "Face_Oval_0": {"1": [30.0, 40.0]},
-            "Left_Eye_0": {"1": [50.0, 60.0]},
-            "Surface_Face_Shape_0": {"1": [55.0, 65.0]},
-            "Mesh_0": {"1": [70.0, 80.0]},
+            "sparse_nose_tip": {"1": [10.0, 20.0]},
+            "dense_nose_tip": {"1": [12.0, 22.0]},
+            "dense_eyes_left_eye_0": {"1": [50.0, 60.0]},
+            "dense_face_oval_0": {"1": [55.0, 65.0]},
+            "full_face_oval_0": {"1": [70.0, 80.0]},
         }
 
         # Also mock nuke.createNode to avoid creating actual Nuke nodes, and mock nuke.allNodes
@@ -339,44 +328,90 @@ class TestTrackerRefinement(unittest.TestCase):
         with patch("os.path.exists", return_value=True), \
              patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(dummy_data))):
 
-            # Case A: Sparse, Nose selected -> only Nose_Tip has data -> 1 track.
+            # Case A: Sparse, Nose selected -> only sparse_nose_tip has data -> 1 track.
             set_knobs("Sparse", True, False, False, False, False)
             success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
             self.assertTrue(success)
             from_script = mock_tracks_knob.fromScript.call_args.args[0]
             self.assertIn("{ 1 31 1 }", from_script)
-            self.assertIn('"Nose_Tip"', from_script)
-            self.assertNotIn('"Face_Oval_0"', from_script)
-            self.assertNotIn('"Mesh_0"', from_script)
+            self.assertIn('"sparse_nose_tip"', from_script)
+            self.assertNotIn('"dense_face_oval_0"', from_script)
+            self.assertNotIn('"full_face_oval_0"', from_script)
 
-            # Case B: Dense, Eyes and Nose selected -> Nose_Tip + Left_Eye_0 -> 2 tracks.
+            # Case B: Dense, Eyes and Nose selected -> dense_nose_tip + dense_eyes_left_eye_0 -> 2 tracks.
             set_knobs("Dense", True, True, False, False, False)
             success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
             self.assertTrue(success)
             from_script = mock_tracks_knob.fromScript.call_args.args[0]
             self.assertIn("{ 1 31 2 }", from_script)
-            self.assertIn('"Nose_Tip"', from_script)
-            self.assertIn('"Left_Eye_0"', from_script)
-            self.assertNotIn('"Surface_Face_Shape_0"', from_script)
+            self.assertIn('"dense_nose_tip"', from_script)
+            self.assertIn('"dense_eyes_left_eye_0"', from_script)
+            self.assertNotIn('"dense_face_oval_0"', from_script)
 
-            # Case C: Surface, Face Shape selected -> Surface_Face_Shape_0 -> 1 track.
-            set_knobs("Surface", False, False, False, False, True)
+            # Case C: Dense, Face selected -> dense_face_oval_0 -> 1 track.
+            set_knobs("Dense", False, False, False, False, True)
             success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
             self.assertTrue(success)
             from_script = mock_tracks_knob.fromScript.call_args.args[0]
             self.assertIn("{ 1 31 1 }", from_script)
-            self.assertIn('"Surface_Face_Shape_0"', from_script)
-            self.assertNotIn('"Nose_Tip"', from_script)
+            self.assertIn('"dense_face_oval_0"', from_script)
+            self.assertNotIn('"sparse_nose_tip"', from_script)
 
-            # Case D: Full mode (respects UI checkboxes) -> Mesh_0 -> 1 track.
+            # Case D: Full mode (respects UI checkboxes) -> full_face_oval_0 -> 1 track.
             set_knobs("Full", True, True, True, True, True)
             success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
             self.assertTrue(success)
             from_script = mock_tracks_knob.fromScript.call_args.args[0]
             self.assertIn("{ 1 31 1 }", from_script)
-            self.assertIn('"Mesh_0"', from_script)
-            self.assertNotIn('"Nose_Tip"', from_script)
-            self.assertNotIn('"Left_Eye_0"', from_script)
+            self.assertIn('"full_face_oval_0"', from_script)
+            self.assertNotIn('"sparse_nose_tip"', from_script)
+            self.assertNotIn('"dense_eyes_left_eye_0"', from_script)
+
+    def test_generate_tracker_node_preserves_missing_detection_frames(self):
+        """Tracker export should not synthesize keyframes for frames missing in backend JSON."""
+        import json
+
+        mock_parent = MagicMock()
+        mock_parent.name.return_value = "FaceTrackerSparse"
+        mock_parent.parent.return_value = MagicMock()
+        knobs = {
+            'landmark_density': MagicMock(value=lambda: "Sparse"),
+            'track_nose': MagicMock(value=lambda: True),
+            'track_eyes': MagicMock(value=lambda: False),
+            'track_eyebrows': MagicMock(value=lambda: False),
+            'track_mouth': MagicMock(value=lambda: False),
+            'track_contour': MagicMock(value=lambda: False),
+            'export_t': MagicMock(value=lambda: True),
+            'export_r': MagicMock(value=lambda: False),
+            'export_s': MagicMock(value=lambda: False),
+            'export_cornerpin_tracker': MagicMock(value=lambda: False),
+            'start_frame': MagicMock(value=lambda: 1),
+            'end_frame': MagicMock(value=lambda: 3),
+        }
+        mock_parent.__getitem__.side_effect = lambda key: knobs[key]
+
+        tracker_data = {
+            "sparse_nose_tip": {
+                "1": [10.0, 20.0],
+                "3": [30.0, 40.0],
+            }
+        }
+
+        mock_nuke.allNodes.return_value = []
+        mock_tracker = MagicMock()
+        mock_tracks_knob = MagicMock()
+        mock_tracker.__getitem__.return_value = mock_tracks_knob
+        mock_nuke.createNode.return_value = mock_tracker
+
+        with patch("os.path.exists", return_value=True), \
+             patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(tracker_data))):
+            success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
+
+        self.assertTrue(success)
+        from_script = mock_tracks_knob.fromScript.call_args.args[0]
+        self.assertIn("x1 10.0", from_script)
+        self.assertIn("x3 30.0", from_script)
+        self.assertNotIn("x2 20.0", from_script)
 
     def test_interpolate_missing_frames_single_points(self):
         """Test linear interpolation and constant extrapolation for a single point landmark (Tracker mode)."""
@@ -425,7 +460,7 @@ class TestTrackerRefinement(unittest.TestCase):
         mock_parent.name.return_value = "FaceTrackerRoto"
         mock_parent.parent.return_value = MagicMock()
 
-        knobs = self.make_roto_knobs(roto_oval=True, roto_bezier=False,
+        knobs = self.make_roto_knobs(roto_face_chin=True, roto_bezier=False,
                                      start_frame=1, end_frame=1)
         mock_parent.__getitem__.side_effect = lambda key: knobs[key]
 
@@ -438,7 +473,7 @@ class TestTrackerRefinement(unittest.TestCase):
         # idx2: prev=points[1]=(150,250), next=points[0]=(100,200) -> (−50,−50)*0.25=(−12.5,−12.5)
         #   ^ wraparound: next index (2+1)%3 = 0 -> points[0]. This is the error-prone case.
         dummy_roto_data = {
-            "Face_Oval": {
+            "roto_face_chin": {
                 "1": [[100.0, 200.0], [150.0, 250.0], [200.0, 220.0]]
             }
         }
@@ -513,13 +548,13 @@ class TestTrackerRefinement(unittest.TestCase):
         mock_parent.name.return_value = "FaceTrackerRoto"
         mock_parent.parent.return_value = MagicMock()
 
-        knobs = self.make_roto_knobs(roto_oval=True, roto_bezier=True,
+        knobs = self.make_roto_knobs(roto_face_chin=True, roto_bezier=True,
                                      start_frame=1, end_frame=1)
         mock_parent.__getitem__.side_effect = lambda key: knobs[key]
 
         # Mock dummy roto JSON contour data
         dummy_roto_data = {
-            "Face_Oval": {
+            "roto_face_chin": {
                 "1": [[100.0, 200.0], [150.0, 250.0], [200.0, 220.0]]
             }
         }
@@ -579,12 +614,12 @@ class TestTrackerRefinement(unittest.TestCase):
         mock_parent.name.return_value = "FaceTrackerRoto"
         mock_parent.parent.return_value = MagicMock()
 
-        knobs = self.make_roto_knobs(roto_oval=True, roto_bezier=True,
+        knobs = self.make_roto_knobs(roto_face_chin=True, roto_bezier=True,
                                      start_frame=1, end_frame=10)
         mock_parent.__getitem__.side_effect = lambda key: knobs[key]
 
         dummy_roto_data = {
-            "Face_Oval": {
+            "roto_face_chin": {
                 "1": [[100.0, 200.0], [150.0, 250.0]],
                 "10": [[110.0, 210.0], [160.0, 260.0]]
             }
@@ -621,24 +656,62 @@ class TestTrackerRefinement(unittest.TestCase):
         self.assertIn((1, 100.0), appended_points[0].center.curves[0].keys)
         self.assertIn((1, 200.0), appended_points[0].center.curves[1].keys)
 
-    def test_generate_roto_node_nose_bridge_uses_open_contour_key(self):
-        """Nose bridge roto should use the contour key and avoid closed-shape tangents."""
+    def test_generate_roto_node_preserves_missing_detection_frames(self):
+        """Roto export should not synthesize control-point keys for missing frames."""
         import json
 
         mock_parent = MagicMock()
         mock_parent.name.return_value = "FaceTrackerRoto"
         mock_parent.parent.return_value = MagicMock()
 
-        knobs = self.make_roto_knobs(roto_oval=False, roto_nose_bridge=True,
+        knobs = self.make_roto_knobs(roto_face_chin=True, roto_bezier=True,
+                                     start_frame=1, end_frame=3)
+        mock_parent.__getitem__.side_effect = lambda key: knobs[key]
+
+        dummy_roto_data = {
+            "roto_face_chin": {
+                "1": [[100.0, 200.0], [150.0, 250.0]],
+                "3": [[120.0, 220.0], [170.0, 270.0]],
+            }
+        }
+
+        mock_rp = MagicMock()
+        sys.modules['nuke.rotopaint'] = mock_rp
+        mock_nuke.rotopaint = mock_rp
+        mock_rp.AnimControlPoint.side_effect = lambda x, y: TestTrackerRefinement._FakeControlPoint()
+
+        appended_points = []
+        mock_shape = MagicMock()
+        mock_shape.append.side_effect = lambda item: appended_points.append(item)
+        mock_shape.__getitem__.side_effect = lambda idx: appended_points[idx]
+        mock_rp.Shape.return_value = mock_shape
+
+        mock_nuke.allNodes.return_value = []
+        mock_nuke.createNode.return_value = MagicMock()
+
+        with patch("os.path.exists", return_value=True), \
+             patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(dummy_roto_data))):
+            success = nuke_tracker.generate_roto_node(mock_parent, "dummy_roto.json", 1920, 1080)
+
+        self.assertTrue(success)
+        self.assertEqual(appended_points[0].center.curves[0].keys, [(1, 100.0), (3, 120.0)])
+        self.assertEqual(appended_points[0].center.curves[1].keys, [(1, 200.0), (3, 220.0)])
+
+    def test_generate_roto_node_open_mapping_contour_skips_closed_tangents(self):
+        """Contours marked openSpline in the mapping avoid closed-shape tangents."""
+        import json
+
+        mock_parent = MagicMock()
+        mock_parent.name.return_value = "FaceTrackerRoto"
+        mock_parent.parent.return_value = MagicMock()
+
+        knobs = self.make_roto_knobs(roto_face_chin=False, roto_face_symmetry_axis=True,
                                      roto_bezier=False, start_frame=1, end_frame=1)
         mock_parent.__getitem__.side_effect = lambda key: knobs[key]
 
         dummy_roto_data = {
-            "Nose_Bridge_Contour": {
+            "roto_face_symmetry_axis": {
                 "1": [[100.0, 200.0], [120.0, 220.0], [140.0, 230.0]]
-            },
-            "Nose_Bridge": {
-                "1": [140.0, 230.0]
             }
         }
 
@@ -688,11 +761,14 @@ class TestTrackerRefinement(unittest.TestCase):
         }
         mock_parent.__getitem__.side_effect = lambda key: knobs[key]
 
-        grouped_contours = {}
-        for group_name, indices in nuke_tracker.landmarks_config.CONTOUR_GROUPS.items():
-            grouped_contours[group_name] = {
-                "1": [[float(i), float(i + 100)] for i in range(len(indices))]
-            }
+        resolved_landmarks = nuke_tracker.landmarks_config.get_landmarks_for_density(
+            "Dense",
+            ["Eyes", "Eyebrows", "Mouth", "Face"],
+        )
+        grouped_contours = {
+            name: {"1": [float(idx), float(idx + 100)]}
+            for name, idx in resolved_landmarks.items()
+        }
 
         mock_nuke.allNodes.return_value = []
         mock_tracker = MagicMock()
@@ -706,17 +782,11 @@ class TestTrackerRefinement(unittest.TestCase):
 
         self.assertTrue(success)
         from_script = mock_tracks_knob.fromScript.call_args.args[0]
-        resolved_landmarks = nuke_tracker.landmarks_config.get_landmarks_for_density(
-            "Dense",
-            ["Eyes", "Eyebrows", "Mouth", "Face Shape"],
-        )
         expected_tracks = len(set(resolved_landmarks.values()))
         self.assertIn(f"{{ 1 31 {expected_tracks} }}", from_script)
-        self.assertIn('"Face_Oval_0"', from_script)
-        self.assertIn('"Face_Oval_8"', from_script)
-        self.assertNotIn('"Left_Cheek_Bone_0"', from_script)
-        self.assertNotIn('"Right_Cheek_Bone_0"', from_script)
-        self.assertIn('"Right_Eyebrow_9"', from_script)
+        self.assertIn('"dense_face_oval_0"', from_script)
+        self.assertIn('"dense_face_oval_8"', from_script)
+        self.assertIn('"dense_eyes_right_eyebrow_5"', from_script)
 
     def test_generate_tracker_node_dedupes_dense_nose_aliases(self):
         """Dense tracker export emits one Tracker4 track per MediaPipe index."""
@@ -740,17 +810,10 @@ class TestTrackerRefinement(unittest.TestCase):
         }
         mock_parent.__getitem__.side_effect = lambda key: knobs[key]
 
+        resolved_landmarks = nuke_tracker.landmarks_config.get_landmarks_for_density("Dense", ["Nose"])
         tracker_data = {
-            "Nose_Tip": {"1": [4.0, 104.0]},
-            "Nose_Bridge": {"1": [168.0, 268.0]},
-            "Nose_Bottom": {"1": [2.0, 102.0]},
-            "Nose_Left_Alar": {"1": [358.0, 458.0]},
-            "Nose_Right_Alar": {"1": [129.0, 229.0]},
-            "Nose_Columella": {"1": [1.0, 101.0]},
-            "Nose_Subnasale": {"1": [2.0, 102.0]},
-            "Nose_Bridge_Contour": {"1": [[float(i), float(i + 100)] for i in range(5)]},
-            "Nose_Left_Nostril": {"1": [[float(i), float(i + 100)] for i in range(6)]},
-            "Nose_Right_Nostril": {"1": [[float(i), float(i + 100)] for i in range(6)]},
+            name: {"1": [float(idx), float(idx + 100)]}
+            for name, idx in resolved_landmarks.items()
         }
 
         mock_nuke.allNodes.return_value = []
@@ -765,14 +828,11 @@ class TestTrackerRefinement(unittest.TestCase):
 
         self.assertTrue(success)
         from_script = mock_tracks_knob.fromScript.call_args.args[0]
-        resolved_landmarks = nuke_tracker.landmarks_config.get_landmarks_for_density("Dense", ["Nose"])
         expected_tracks = len(set(resolved_landmarks.values()))
         self.assertIn(f"{{ 1 31 {expected_tracks} }}", from_script)
-        self.assertIn('"Nose_Bridge"', from_script)
-        self.assertIn('"Nose_Bridge_Contour_0"', from_script)
-        self.assertNotIn('"Nose_Bridge_Contour_4"', from_script)
-        self.assertIn('"Nose_Bottom"', from_script)
-        self.assertNotIn('"Nose_Subnasale"', from_script)
+        self.assertIn('"dense_nose_bridge_0"', from_script)
+        self.assertIn('"dense_nose_tip"', from_script)
+        self.assertIn('"dense_nose_columella"', from_script)
 
     # ------------------------------------------------------------------
     # find_vector_channels (frontend/nuke_tracker.py ~94-154)
@@ -943,9 +1003,8 @@ class TestTrackerRefinement(unittest.TestCase):
             "Left_Eye_Inner": {"5": [200.0, 100.0]},
         }
         res = nuke_tracker.calculate_cornerpin_data(tracker_data, 1, 10, 1920, 1080)
-        # Every frame 1..10 holds the same constant (single keyframe extrapolated).
-        for frame in range(1, 11):
-            self.assertEqual(res[frame], [[50.0, 50.0], [250.0, 50.0], [250.0, 150.0], [50.0, 150.0]])
+        self.assertEqual(set(res.keys()), {5})
+        self.assertEqual(res[5], [[50.0, 50.0], [250.0, 50.0], [250.0, 150.0], [50.0, 150.0]])
 
     def test_calculate_cornerpin_data_rotated_eye_line_90(self):
         """Eye line rotated +90deg: corners are the face-space AABB rotated back by +theta.
@@ -971,20 +1030,13 @@ class TestTrackerRefinement(unittest.TestCase):
         }
         res = nuke_tracker.calculate_cornerpin_data(tracker_data, 1, 10, 1920, 1080)
         expected = [[150.0, -50.0], [150.0, 150.0], [50.0, 150.0], [50.0, -50.0]]
-        for frame in range(1, 11):
-            self.assertEqual(res[frame], expected)
+        self.assertEqual(set(res.keys()), {5})
+        self.assertEqual(res[5], expected)
 
-    def test_calculate_cornerpin_data_empty_frame_uses_full_frame_default(self):
-        """When no track contributes points for a frame, the full-frame default corners are used.
-
-        interpolate_missing_frames constant-extrapolates a single keyframe to every
-        frame in range, so a single-point track still populates every frame. The
-        full-frame default is therefore only reached when tracker_data is empty (or
-        every track is empty) -- i.e. there are genuinely no points to bound.
-        """
+    def test_calculate_cornerpin_data_empty_input_returns_no_keyframes(self):
+        """No detected landmarks should produce no synthetic CornerPin keys."""
         res = nuke_tracker.calculate_cornerpin_data({}, 1, 3, width=1920, height=1080)
-        for frame in range(1, 4):
-            self.assertEqual(res[frame], [[0, 0], [1920, 0], [1920, 1080], [0, 1080]])
+        self.assertEqual(res, {})
 
     def test_generate_cornerpin_node_sets_to_and_from_keyframes(self):
         """generate_cornerpin_node sets constant 'to' knobs at the reference frame and
@@ -1039,7 +1091,7 @@ class TestTrackerRefinement(unittest.TestCase):
         knob_mocks['to3'].setValue.assert_any_call([250.0, 150.0]) # TR
         knob_mocks['to4'].setValue.assert_any_call([50.0, 150.0])  # TL
 
-        # 'from' knobs are animated and keyframed for every frame in 1..10.
+        # 'from' knobs are animated but keyframed only where tracking data exists.
         for i in range(1, 5):
             self.assertTrue(knob_mocks[f'from{i}'].setAnimated.called)
 
@@ -1057,9 +1109,9 @@ class TestTrackerRefinement(unittest.TestCase):
         knob_mocks['from4'].setValueAt.assert_any_call(50.0, 5, 0)
         knob_mocks['from4'].setValueAt.assert_any_call(150.0, 5, 1)
 
-        # Total setValueAt calls per from knob: one (x,y) pair per frame * 10 frames = 20.
+        # Total setValueAt calls per from knob: one (x,y) pair for frame 5 only.
         for i in range(1, 5):
-            self.assertEqual(knob_mocks[f'from{i}'].setValueAt.call_count, 20)
+            self.assertEqual(knob_mocks[f'from{i}'].setValueAt.call_count, 2)
 
     def test_generate_tracker_node_injects_cornerpin_tracks(self):
         """export_cornerpin_tracker=True injects Corner_BL/BR/TR/TL tracks into the Tracker4 node."""
@@ -1084,7 +1136,7 @@ class TestTrackerRefinement(unittest.TestCase):
 
         # theta=0 synthetic data: AABB (50,50)-(250,150) for the corner tracks.
         tracker_data = {
-            "Nose_Tip": {"5": [10.0, 20.0]},
+            "sparse_nose_tip": {"5": [10.0, 20.0]},
             "P1": {"5": [50.0, 50.0]},
             "P2": {"5": [250.0, 50.0]},
             "P3": {"5": [250.0, 150.0]},
@@ -1107,13 +1159,28 @@ class TestTrackerRefinement(unittest.TestCase):
 
         self.assertTrue(success)
         from_script = mock_tracks_knob.fromScript.call_args.args[0]
-        # Sparse + Nose resolves only Nose_Tip (1 track) + 4 corner tracks = 5 total.
+        # Sparse + Nose resolves only sparse_nose_tip (1 track) + 4 corner tracks = 5 total.
         self.assertIn("{ 1 31 5 }", from_script)
-        self.assertIn('"Nose_Tip"', from_script)
+        self.assertIn('"sparse_nose_tip"', from_script)
         self.assertIn('"Corner_BL"', from_script)
         self.assertIn('"Corner_BR"', from_script)
         self.assertIn('"Corner_TR"', from_script)
         self.assertIn('"Corner_TL"', from_script)
+
+    def test_gridwarp_payload_preserves_missing_detection_frames(self):
+        """GridWarp payload should include only frames with a complete detected grid."""
+        tracker_data = {}
+        for name, idx in nuke_tracker.landmarks_config.get_grid_landmarks().items():
+            tracker_data[name] = {
+                "1": [float(idx), float(idx + 100)],
+                "3": [float(idx + 10), float(idx + 110)],
+            }
+
+        payload, err = nuke_tracker._grid_payload_from_tracks(tracker_data, 1, 3, 1)
+
+        self.assertIsNone(err)
+        self.assertEqual(set(payload["source"].keys()), {"1", "3"})
+        self.assertEqual(payload["reference_frame"], 1)
 
 
 # ---------------------------------------------------------------------------

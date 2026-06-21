@@ -243,6 +243,7 @@ def main():
         parser.add_argument("--end", type=int, required=True, help="End frame index")
         parser.add_argument("--width", type=int, help="Optional frame width (passed from Nuke)")
         parser.add_argument("--height", type=int, help="Optional frame height (passed from Nuke)")
+        parser.add_argument("--mapping", help="Path to mapping JSON exported from the landmark grouper")
         parser.add_argument("--landmarks", help="Comma-separated landmark names to track")
         parser.add_argument("--export-type", default="trackers", choices=["trackers", "roto"], help="Export type: standard trackers or sequential roto splines")
         parser.add_argument("--mode", default="video", choices=["image", "video"], help="Tracking mode: image (frame-by-frame) or video (temporal tracking)")
@@ -252,6 +253,9 @@ def main():
         parser.add_argument("--backward", action="store_true", help="Track frames in reverse order (from end to start)")
 
         args = parser.parse_args()
+
+        if args.mapping:
+            landmarks_config.load_mapping(args.mapping)
 
         # Always track the full backend payload. Frontend export options decide
         # which subset is turned into Tracker4 points or Roto splines later.
