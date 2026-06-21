@@ -1,0 +1,25 @@
+'use strict';
+// Entry point: canvas + 2d context, the shared refresh() helper, resize, event
+// wiring, and bootstrap. All other logic lives in data/state/geometry/grid/model/view.
+// Loaded last so every referenced function and binding already exists at call time.
+
+const canvas=document.getElementById('canvas'), ctx=canvas.getContext('2d');
+function refresh(){renderGroups();stats();draw();exportJson();}
+function resize(){const r=canvas.getBoundingClientRect(); canvas.width=Math.max(1,Math.floor(r.width*devicePixelRatio)); canvas.height=Math.max(1,Math.floor(r.height*devicePixelRatio)); draw();}
+window.addEventListener('resize',()=>{applyUiState();});
+canvas.addEventListener('mousemove',e=>{const pos=fromEvent(e); if(gridDrag){moved=true; applyGridDrag(pos); return;} if(dragMode){const dx=e.clientX-last.x,dy=e.clientY-last.y; if(Math.hypot(dx,dy)>1)moved=true; if(dragMode==='rotate'){freeRot.yaw+=dx*.005; freeRot.pitch=Math.max(-Math.PI*.49,Math.min(Math.PI*.49,freeRot.pitch+dy*.005));} else {pan.x+=dx; pan.y+=dy;} last={x:e.clientX,y:e.clientY}; draw(); return;} const hit=gridHitTest(pos); if(hit){const p=hit.child.grid.points[hit.index]; el('info').innerHTML=`<b>Grid r${p.row+1} c${p.col+1}</b><br>${p.id==null?'not snapped':'landmark '+p.id}`; canvas.style.cursor='grab'; draw(); return;} canvas.style.cursor='crosshair'; hovered=nearest(pos); if(hovered==null)el('info').textContent='Hover a point'; else {const memberships=[...childIdsForPoint(hovered)].map(cid=>findChild(cid)).filter(Boolean), v=landmarkPoint(hovered), virtual=IRIS_IDS.has(hovered)?'<br>virtual iris point':'', memberHtml=memberships.length?memberships.map(x=>`<br>${esc(x.parent.name)}: <span style="color:${x.child.color||'#e8edf5'}">${esc(x.child.name)}</span>`).join(''):'free'; el('info').innerHTML=`<b>ID ${hovered}</b>${virtual}<br>x ${v[0].toFixed(3)}<br>y ${v[1].toFixed(3)}<br>z ${v[2].toFixed(3)}<br>${memberHtml}`;} draw();});
+canvas.addEventListener('mousedown',e=>{moved=false;last={x:e.clientX,y:e.clientY}; const hit=gridHitTest(fromEvent(e)); if(hit){gridDrag=hit; canvas.style.cursor='grabbing'; applyGridDrag(fromEvent(e)); return;} dragMode=(viewMode==='free3d'&&e.button===0&&!e.shiftKey)?'rotate':'pan';});
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+window.addEventListener('mouseup',()=>{dragMode=null; gridDrag=null; canvas.style.cursor='crosshair';});
+canvas.addEventListener('click',e=>{if(isGridProfile())return; if(moved)return; const id=nearest(fromEvent(e)); if(id==null)return; selected=id; if(e.altKey){unassign(id);return} if(!activeChild){appToast('Create or select a child group first.','error');return} if(!assign(id))draw();});
+canvas.addEventListener('wheel',e=>{e.preventDefault(); const nextScale=Math.max(.2,Math.min(12,scale*(e.deltaY<0?1.1:.9))); if(nextScale!==scale)zoomAt(fromEvent(e),nextScale); draw();},{passive:false});
+el('addParent').onclick=()=>addParent(); el('parentName').addEventListener('keydown',e=>{if(e.key==='Enter')addParent();});
+el('addChild').onclick=()=>addChild(); el('childName').addEventListener('keydown',e=>{if(e.key==='Enter')addChild();});
+el('addManual').onclick=()=>{if(!activeChild){appToast('Select a child group first.','error');return} for(const id of parseIds(el('manualIds').value))assign(id); el('manualIds').value='';};
+el('profileSelect').onchange=e=>useProfile(e.target.value);
+el('exportBtn').onclick=exportJson; el('validateBtn').onclick=validateJsonBox; el('importBtn').onclick=importJson; el('downloadBtn').onclick=()=>{const blob=new Blob([JSON.stringify(exportJson(),null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='mediapipe_landmark_profiles.json'; a.click(); URL.revokeObjectURL(a.href);};
+el('clearAll').onclick=async()=>{if(await appConfirm('Clear current profile?','Clear profile','Clear',true)){resetCurrentProfile();refresh();appToast('Profile cleared.','ok');}};
+el('resetView').onclick=()=>{scale=1;pan={x:0,y:0};freeRot={yaw:0,pitch:0};draw();}; el('toggleMesh').onclick=e=>{showMesh=!showMesh;e.target.textContent='Mesh: '+(showMesh?'ON':'OFF');draw();}; el('toggleLabels').onclick=e=>{showLabels=!showLabels;e.target.textContent='ID: '+(showLabels?'ON':'OFF');draw();}; el('toggleGridSymmetry').onclick=()=>{showGridSymmetry=!showGridSymmetry;updateViewControls();draw();}; el('showAll').onclick=()=>setFilter('all'); el('showUnassigned').onclick=()=>setFilter('unassigned'); el('unassignSelected').onclick=()=>{if(selected!=null)unassign(selected);}; el('viewMode').onchange=e=>{viewMode=isGridProfile()?'unwrap':e.target.value; if(isGridProfile())e.target.value='unwrap'; scale=1;pan={x:0,y:0};updateViewControls();draw();};
+el('unwrapStrength').oninput=e=>setUnwrapStrength(e.target.value);
+el('unwrapStrength').onchange=e=>setUnwrapStrength(e.target.value,true);
+uiState=loadUiState(); initPanelControls(); updateUnwrapStrengthUi(); updateViewControls(); updateProfileHint(); applyUiState(); resize(); loadInitialProfiles();
