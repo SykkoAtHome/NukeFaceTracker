@@ -2,7 +2,6 @@
 function centeredPoint(v){return [v[0]-MODEL_CENTER_3D[0],v[1]-MODEL_CENTER_3D[1],v[2]-MODEL_CENTER_3D[2]];}
 function free3dBounds(){let radius=0; for(let i=0;i<MAX_LANDMARKS;i++){const v=centeredPoint(landmarkPoint(i)); radius=Math.max(radius,Math.hypot(v[0],v[1],v[2]));} return {minX:-radius,maxX:radius,minY:-radius,maxY:radius};}
 const FREE3D_BOUNDS = free3dBounds();
-let unwrapStrength=0, unwrapRecalcTimer=null;
 function frontPoint(id){const v=landmarkPoint(id); return [v[0],-v[1]];}
 function flatBounds(points){
   let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
@@ -60,27 +59,8 @@ function updateViewControls(){
     symmetry.classList.toggle('activeBtn',showGridSymmetry);
   }
 }
-const COLORS=['#7cc7ff','#55d68a','#ffcc66','#ff7aa2','#b6f36b','#93c5fd','#d8b4fe','#fdba74','#a7f3d0','#fca5a5','#f0abfc','#67e8f9'];
-const PROFILE_NAMES=['full','dense','sparse','roto','grid'];
-const PROFILE_HINTS={
-  full:'Full profile uses regular unordered landmark groups.',
-  dense:'Dense profile uses separate regular landmark groups.',
-  sparse:'Sparse profile uses separate regular landmark groups.',
-  roto:'Roto profile is for face-part contours. Click landmarks in outline order; use Open spline for nose bridge.',
-  grid:'Grid profile builds an expandable overlay in Unwrap view. Drag grid handles onto landmarks; Symmetry moves the mirrored handle too.'
-};
-const GRID_EDGE_COLORS={top:'#ffbf4d',bottom:'#b48cff',left:'#58d68d',right:'#ff7aa2'};
-function emptyProfile(){return {parents:[],assigned:new Map(),activeChild:null}}
-const profiles=Object.fromEntries(PROFILE_NAMES.map(name=>[name,emptyProfile()]));
-let currentProfile='full', parents=profiles.full.parents, assigned=profiles.full.assigned, activeChild=profiles.full.activeChild, selected=null, hovered=null;
-let showMesh=true, showLabels=false, viewMode='front', scale=1, pan={x:0,y:0}, freeRot={yaw:0,pitch:0}, dragMode=null, last={x:0,y:0}, moved=false;
-let showGridSymmetry=true, gridDrag=null;
-let filter={mode:'all', parentId:null, childId:null};
-let transformCache=null;
 const canvas=document.getElementById('canvas'), ctx=canvas.getContext('2d');
 function el(id){return document.getElementById(id)}
-const UI_STORAGE_KEY='mediapipeLandmarkGrouper.ui';
-const uiState=loadUiState();
 function uiClamp(value,min,max){return Math.max(min,Math.min(max,value))}
 function maxLeftPanelWidth(){return Math.max(260,Math.min(560,window.innerWidth-260))}
 function loadUiState(){
@@ -391,4 +371,4 @@ el('clearAll').onclick=async()=>{if(await appConfirm('Clear current profile?','C
 el('resetView').onclick=()=>{scale=1;pan={x:0,y:0};freeRot={yaw:0,pitch:0};draw();}; el('toggleMesh').onclick=e=>{showMesh=!showMesh;e.target.textContent='Mesh: '+(showMesh?'ON':'OFF');draw();}; el('toggleLabels').onclick=e=>{showLabels=!showLabels;e.target.textContent='ID: '+(showLabels?'ON':'OFF');draw();}; el('toggleGridSymmetry').onclick=()=>{showGridSymmetry=!showGridSymmetry;updateViewControls();draw();}; el('showAll').onclick=()=>setFilter('all'); el('showUnassigned').onclick=()=>setFilter('unassigned'); el('unassignSelected').onclick=()=>{if(selected!=null)unassign(selected);}; el('viewMode').onchange=e=>{viewMode=isGridProfile()?'unwrap':e.target.value; if(isGridProfile())e.target.value='unwrap'; scale=1;pan={x:0,y:0};updateViewControls();draw();};
 el('unwrapStrength').oninput=e=>setUnwrapStrength(e.target.value);
 el('unwrapStrength').onchange=e=>setUnwrapStrength(e.target.value,true);
-initPanelControls(); updateUnwrapStrengthUi(); updateViewControls(); updateProfileHint(); applyUiState(); resize(); loadInitialProfiles();
+uiState=loadUiState(); initPanelControls(); updateUnwrapStrengthUi(); updateViewControls(); updateProfileHint(); applyUiState(); resize(); loadInitialProfiles();
