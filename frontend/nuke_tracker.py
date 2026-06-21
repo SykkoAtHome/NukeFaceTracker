@@ -376,6 +376,12 @@ def _configure_mapping_for_node(node, show_errors=True):
 def reload_mapping_from_panel(node):
     if not _configure_mapping_for_node(node):
         return False
+    try:
+        _rebuild_dynamic_tabs(node)
+    except Exception as e:
+        print("[NukeFaceTracker] Roto/Tracker UI rebuild failed: {}".format(e))
+        import traceback
+        traceback.print_exc()
     return True
 
 
@@ -602,6 +608,72 @@ def _build_gridwarp_tab(node):
     create_gridwarp_btn = nuke.PyScript_Knob("create_gridwarp_btn", "Export GridWarp", "import nuke_tracker; nuke_tracker.generate_gridwarp_node_from_panel(nuke.thisNode())")
     create_gridwarp_btn.setFlag(nuke.STARTLINE)
     node.addKnob(create_gridwarp_btn)
+
+
+def _capture_knob_values(node, names):
+    """Return a dict of current values for the named knobs, ignoring any errors."""
+    values = {}
+    for name in names:
+        try:
+            if name in node.knobs():
+                values[name] = node[name].value()
+        except Exception:
+            pass
+    return values
+
+
+def _remove_knobs_from(node, start_knob_name):
+    """Remove every knob from start_knob_name to the end of the node's knob list.
+
+    Removing in reverse order guarantees that child knobs of a tab are deleted
+    before the Tab_Knob itself, which Nuke requires.
+    """
+    to_remove = []
+    start_found = False
+    for idx in range(node.numKnobs()):
+        knob = node.knob(idx)
+        if knob is None:
+            continue
+        if knob.name() == start_knob_name:
+            start_found = True
+        if start_found:
+            to_remove.append(knob)
+
+    for knob in reversed(to_remove):
+        try:
+            node.removeKnob(knob)
+        except Exception as e:
+            print(
+                "[NukeFaceTracker] WARNING: Could not remove knob '{}' during UI rebuild: {}".format(
+                    getattr(knob, "name", lambda: "?")(), e
+                )
+            )
+
+
+def _restore_knob_values(node, values):
+    """Write captured values back to knobs that still exist on the node."""
+    for name, value in values.items():
+        try:
+            if name in node.knobs():
+                node[name].setValue(value)
+        except Exception:
+            pass
+
+
+def _rebuild_dynamic_tabs(node):
+    """Rebuild Tracker/Roto/CornerPin/GridWarp/Settings from the active mapping.
+
+    Preserves the mapping path and reference-frame knobs. Roto/Tracker selection
+    knobs are recreated from the current mapping defaults.
+    """
+    captured = _capture_knob_values(node, ("mapping_json", "ref_frame", "grid_ref_frame"))
+    _remove_knobs_from(node, "tracker_tab")
+    _build_tracker_tab(node)
+    _build_roto_tab(node)
+    _build_cornerpin_tab(node)
+    _build_gridwarp_tab(node)
+    _build_settings_tab(node)
+    _restore_knob_values(node, captured)
 
 
 def _build_knob_changed_script():

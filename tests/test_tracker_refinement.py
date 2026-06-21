@@ -168,6 +168,68 @@ class TestTrackerRefinement(unittest.TestCase):
         self.assertIn("roto_group_", script)
         self.assertIn("set_roto_group_selection", script)
 
+    def test_remove_knobs_from_removes_tail_in_reverse(self):
+        """Knobs from the start knob to the end must be deleted in reverse order."""
+        names = ["tracking_tab", "start_frame", "tracker_tab", "landmark_density", "track_nose"]
+        knobs = []
+        for name in names:
+            knob = MagicMock()
+            knob.name.return_value = name
+            knobs.append(knob)
+
+        node = MagicMock()
+        node.numKnobs.return_value = len(knobs)
+        node.knob.side_effect = knobs.__getitem__
+
+        nuke_tracker._remove_knobs_from(node, "tracker_tab")
+
+        removed_names = [call.args[0].name() for call in node.removeKnob.call_args_list]
+        self.assertEqual(removed_names, ["track_nose", "landmark_density", "tracker_tab"])
+        self.assertEqual(node.removeKnob.call_count, 3)
+
+    def test_rebuild_dynamic_tabs_captures_and_restores_mapping_json(self):
+        """Rebuild preserves the user-selected mapping path and ref-frame knobs."""
+        with patch("nuke_tracker._capture_knob_values", return_value={"mapping_json": "/custom/mapping.json"}) as capture_mock, \
+             patch("nuke_tracker._remove_knobs_from") as remove_mock, \
+             patch("nuke_tracker._build_tracker_tab") as build_tracker, \
+             patch("nuke_tracker._build_roto_tab") as build_roto, \
+             patch("nuke_tracker._build_cornerpin_tab") as build_cornerpin, \
+             patch("nuke_tracker._build_gridwarp_tab") as build_gridwarp, \
+             patch("nuke_tracker._build_settings_tab") as build_settings, \
+             patch("nuke_tracker._restore_knob_values") as restore_mock:
+            node = MagicMock()
+            nuke_tracker._rebuild_dynamic_tabs(node)
+
+        capture_mock.assert_called_once_with(node, ("mapping_json", "ref_frame", "grid_ref_frame"))
+        remove_mock.assert_called_once_with(node, "tracker_tab")
+        build_tracker.assert_called_once_with(node)
+        build_roto.assert_called_once_with(node)
+        build_cornerpin.assert_called_once_with(node)
+        build_gridwarp.assert_called_once_with(node)
+        build_settings.assert_called_once_with(node)
+        restore_mock.assert_called_once_with(node, {"mapping_json": "/custom/mapping.json"})
+
+    def test_reload_mapping_from_panel_invokes_rebuild(self):
+        """Reload Mapping loads the JSON backend and rebuilds the dynamic UI."""
+        with patch("nuke_tracker._configure_mapping_for_node", return_value=True) as configure_mock, \
+             patch("nuke_tracker._rebuild_dynamic_tabs") as rebuild_mock:
+            node = MagicMock()
+            result = nuke_tracker.reload_mapping_from_panel(node)
+
+        self.assertTrue(result)
+        configure_mock.assert_called_once_with(node)
+        rebuild_mock.assert_called_once_with(node)
+
+    def test_reload_mapping_from_panel_survives_rebuild_error(self):
+        """A UI rebuild failure must not break the backend mapping reload."""
+        with patch("nuke_tracker._configure_mapping_for_node", return_value=True), \
+             patch("nuke_tracker._rebuild_dynamic_tabs", side_effect=RuntimeError("boom")) as rebuild_mock:
+            node = MagicMock()
+            result = nuke_tracker.reload_mapping_from_panel(node)
+
+        self.assertTrue(result)
+        rebuild_mock.assert_called_once_with(node)
+
     def test_analysis_tracks_all_roto_export_contours(self):
         """Tracking stores all Roto-tab contours so export choices can be changed later."""
         mock_node = MagicMock()
