@@ -283,12 +283,13 @@ def get_all_part_names():
     return list(SPARSE_PART_TO_LANDMARKS.keys())
 
 
-def get_landmarks_for_analysis(density=None, active_parts=None):
+def get_landmarks_for_analysis():
     """
-    Returns the tracker data that should be recorded during analysis.
+    Returns the full export superset of tracker landmarks recorded during analysis.
 
-    Backend tracking records the full export superset. Tracker and Roto exports
-    filter this data later according to the user's current frontend choices.
+    No filtering is applied: every density and every part is merged into a single
+    resolved dictionary. Tracker and Roto exports filter this superset later
+    according to the user's current frontend choices.
     """
     resolved = {}
     parts = get_all_part_names()
@@ -297,6 +298,30 @@ def get_landmarks_for_analysis(density=None, active_parts=None):
         _merge_landmarks(resolved, get_landmarks_for_density(analysis_density, parts))
 
     return resolved
+
+
+def resolve_contour_point(name):
+    """
+    Resolve a contour point track name to its contour group and in-group position.
+
+    Contour point names follow the ``GroupName_N`` convention (e.g. ``Face_Oval_3``),
+    where ``N`` is the 0-based position within that group's point list in
+    ``CONTOUR_GROUPS`` (NOT the MediaPipe landmark index).
+
+    Returns ``(group_name, N)`` when ``name`` matches a contour group prefix and
+    ``N`` is in range for that group, otherwise ``None``.
+    """
+    for group_name, indices in CONTOUR_GROUPS.items():
+        prefix = group_name + "_"
+        if name.startswith(prefix):
+            try:
+                idx_in_group = int(name[len(prefix):])
+            except ValueError:
+                return None
+            if 0 <= idx_in_group < len(indices):
+                return (group_name, idx_in_group)
+            return None
+    return None
 
 
 # Flat dictionary of all individual landmarks for quick lookup

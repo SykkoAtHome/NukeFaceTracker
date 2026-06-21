@@ -17,6 +17,55 @@ except ImportError:
 # Import landmarks configurations
 import landmarks_config
 
+def _to_nuke_xy(lm, width, height):
+    """Convert a MediaPipe normalized landmark to Nuke pixel space [x, y].
+
+    MediaPipe landmarks are normalized [0,1] with origin at top-left; Nuke
+    uses pixel coordinates with origin at bottom-left, so y is flipped.
+    """
+    return [round(lm.x * width, 3), round(height - (lm.y * height), 3)]
+
+def _avg_points(f_val, b_val):
+    """Average two equal-length point lists coordinate-wise.
+
+    Preserves the existing zip(f_val, b_val) silent-truncation behavior: if the
+    lists differ in length, the trailing elements of the longer list are
+    silently dropped. Do not change this; a dedicated test documents it.
+    """
+    merged_pts = []
+    for p1, p2 in zip(f_val, b_val):
+        merged_pts.append([
+            round((p1[0] + p2[0]) / 2.0, 3),
+            round((p1[1] + p2[1]) / 2.0, 3)
+        ])
+    return merged_pts
+
+def _avg_point(f_val, b_val):
+    """Average two single [x, y] points coordinate-wise."""
+    return [
+        round((f_val[0] + b_val[0]) / 2.0, 3),
+        round((f_val[1] + b_val[1]) / 2.0, 3)
+    ]
+
+def _merge_frame_values(f_frames, b_frames, average_fn):
+    """Merge per-frame values from forward and backward passes.
+
+    Frames present in both passes are combined via average_fn(f_val, b_val);
+    frames present in only one pass keep that pass's value unchanged.
+    """
+    merged = {}
+    all_frames = set(f_frames.keys()).union(b_frames.keys())
+    for frame in all_frames:
+        f_val = f_frames.get(frame)
+        b_val = b_frames.get(frame)
+        if f_val is not None and b_val is not None:
+            merged[frame] = average_fn(f_val, b_val)
+        elif f_val is not None:
+            merged[frame] = f_val
+        elif b_val is not None:
+            merged[frame] = b_val
+    return merged
+
 def get_frame_path(pattern, frame_num):
     """Converts a Nuke-style path pattern (e.g., .####.png or .%04d.png) to a concrete frame file path."""
     cleaned_pattern = pattern
@@ -49,165 +98,138 @@ def run_tracking_pass(frame_sequence, options, args, is_sequence, width, height,
         sys.exit(1)
 
     cap = None
-    if not is_sequence:
-        cap = cv2.VideoCapture(args.input)
-        if not cap.isOpened():
-            print(f"[ERROR] Failed to open video file: {args.input}")
-            sys.exit(1)
+    try:
+        if not is_sequence:
+            cap = cv2.VideoCapture(args.input)
+            if not cap.isOpened():
+                print(f"[ERROR] Failed to open video file: {args.input}")
+                # Raise so the finally below still releases detector/cap instead
+                # of bypassing cleanup via sys.exit. main() catches and exits 1.
+                raise RuntimeError(f"Failed to open video file: {args.input}")
 
-    pass_results = {}
-    for group_name in contours_to_track.keys():
-        pass_results[group_name] = {}
-    for name in landmarks_to_track.keys():
-        pass_results[name] = {}
+        pass_results = {}
+        for group_name in contours_to_track.keys():
+            pass_results[group_name] = {}
+        for name in landmarks_to_track.keys():
+            pass_results[name] = {}
 
-    for idx, frame_num in enumerate(frame_sequence):
-        try:
-            cv_image = None
+        for idx, frame_num in enumerate(frame_sequence):
+            try:
+                cv_image = None
 
-            if is_sequence:
-                frame_path = get_frame_path(args.input, frame_num)
-                if not os.path.exists(frame_path):
-                    print(f"[WARNING] Frame not found: {frame_path}")
-                    continue
-                # Read image (using any depth flag for floating-point file support e.g. EXR)
-                cv_image = cv2.imread(frame_path, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
-                if cv_image is None:
-                    print(f"[WARNING] Failed to read frame: {frame_path}")
-                    continue
+                if is_sequence:
+                    frame_path = get_frame_path(args.input, frame_num)
+                    if not os.path.exists(frame_path):
+                        print(f"[WARNING] Frame not found: {frame_path}")
+                        continue
+                    # Read image (using any depth flag for floating-point file support e.g. EXR)
+                    cv_image = cv2.imread(frame_path, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
+                    if cv_image is None:
+                        print(f"[WARNING] Failed to read frame: {frame_path}")
+                        continue
 
-                # If high dynamic range/bit depth (e.g. 16/32-bit float), convert to 8-bit LDR for MediaPipe
-                if cv_image.dtype != 'uint8':
-                    cv2.normalize(cv_image, cv_image, 0, 255, cv2.NORM_MINMAX)
-                    cv_image = cv_image.astype('uint8')
-            else:
-                # Set position index (0-based) for video file
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num - 1)
-                ret, cv_image = cap.read()
-                if not ret or cv_image is None:
-                    print(f"[WARNING] Failed to read frame {frame_num} from video")
-                    continue
+                    # If high dynamic range/bit depth (e.g. 16/32-bit float), convert to 8-bit LDR for MediaPipe
+                    if cv_image.dtype != 'uint8':
+                        cv2.normalize(cv_image, cv_image, 0, 255, cv2.NORM_MINMAX)
+                        cv_image = cv_image.astype('uint8')
+                else:
+                    # Set position index (0-based) for video file.
+                    # Seek by the relative enumerate index, not the user's Nuke frame
+                    # number: VFX ranges often do not start at 1 (e.g. start=1001), so
+                    # using frame_num directly would seek past the video end.
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                    ret, cv_image = cap.read()
+                    if not ret or cv_image is None:
+                        print(f"[WARNING] Failed to read frame {frame_num} from video")
+                        continue
 
-            # Fallback resolution detection from the first loaded frame
-            if not width or not height:
-                height, width = cv_image.shape[:2]
-                print(f"[INFO] Auto-detected frame resolution: {width}x{height}")
+                # Fallback resolution detection from the first loaded frame
+                if not width or not height:
+                    height, width = cv_image.shape[:2]
+                    print(f"[INFO] Auto-detected frame resolution: {width}x{height}")
 
-            # Convert BGR -> RGB for MediaPipe ingestion
-            rgb_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_image)
+                # Convert BGR -> RGB for MediaPipe ingestion
+                rgb_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_image)
 
-            # Perform inference
-            if run_mode == vision.RunningMode.VIDEO:
-                # Generate a monotonic timestamp in milliseconds based on the loop index (idx).
-                # This ensures that timestamps always start exactly at 0, are strictly non-negative, and
-                # monotonically increase, even if the user tracks negative frame ranges (common in VFX)
-                # or custom non-zero start frames.
-                timestamp_ms = int(idx * 1000.0 / fps)
-                detection_result = detector.detect_for_video(mp_image, timestamp_ms)
-            else:
-                detection_result = detector.detect(mp_image)
+                # Perform inference
+                if run_mode == vision.RunningMode.VIDEO:
+                    # Generate a monotonic timestamp in milliseconds based on the loop index (idx).
+                    # This ensures that timestamps always start exactly at 0, are strictly non-negative, and
+                    # monotonically increase, even if the user tracks negative frame ranges (common in VFX)
+                    # or custom non-zero start frames.
+                    timestamp_ms = int(idx * 1000.0 / fps)
+                    detection_result = detector.detect_for_video(mp_image, timestamp_ms)
+                else:
+                    detection_result = detector.detect(mp_image)
 
-            if detection_result.face_landmarks:
-                landmarks = detection_result.face_landmarks[0]
+                if detection_result.face_landmarks:
+                    landmarks = detection_result.face_landmarks[0]
 
-                # Fetch coordinates for each contour group sequentially
-                for group_name, indices in contours_to_track.items():
-                    points = []
-                    all_valid = True
-                    for l_idx in indices:
+                    # Fetch coordinates for each contour group sequentially
+                    for group_name, indices in contours_to_track.items():
+                        points = []
+                        all_valid = True
+                        for l_idx in indices:
+                            if l_idx < len(landmarks):
+                                lm = landmarks[l_idx]
+                                points.append(_to_nuke_xy(lm, width, height))
+                            else:
+                                all_valid = False
+                        if all_valid and len(points) == len(indices):
+                            pass_results[group_name][str(frame_num)] = points
+
+                    # Fetch coordinates for each selected landmark
+                    for name, l_idx in landmarks_to_track.items():
                         if l_idx < len(landmarks):
                             lm = landmarks[l_idx]
-                            x_nuke = lm.x * width
-                            y_nuke = height - (lm.y * height)
-                            points.append([round(x_nuke, 3), round(y_nuke, 3)])
-                        else:
-                            all_valid = False
-                    if all_valid and len(points) == len(indices):
-                        pass_results[group_name][str(frame_num)] = points
+                            # Store as string keys for strict JSON compatibility
+                            pass_results[name][str(frame_num)] = _to_nuke_xy(lm, width, height)
 
-                # Fetch coordinates for each selected landmark
-                for name, l_idx in landmarks_to_track.items():
-                    if l_idx < len(landmarks):
-                        lm = landmarks[l_idx]
+            except Exception as frame_error:
+                print(f"[WARNING] Error occurred while tracking frame {frame_num}: {frame_error}")
+                import traceback
+                traceback.print_exc()
 
-                        # Convert coordinates to Nuke space
-                        x_nuke = lm.x * width
-                        y_nuke = height - (lm.y * height)
+            # Output progress stream for Nuke parsing
+            current_progress_frame = progress_offset + idx + 1
+            progress = int((current_progress_frame / total_progress_frames) * 100)
+            sys.stdout.write(f"PROGRESS: {progress}%\n")
+            sys.stdout.flush()
 
-                        # Store as string keys for strict JSON compatibility
-                        pass_results[name][str(frame_num)] = [round(x_nuke, 3), round(y_nuke, 3)]
-
-        except Exception as frame_error:
-            print(f"[WARNING] Error occurred while tracking frame {frame_num}: {frame_error}")
-            import traceback
-            traceback.print_exc()
-
-        # Output progress stream for Nuke parsing
-        current_progress_frame = progress_offset + idx + 1
-        progress = int((current_progress_frame / total_progress_frames) * 100)
-        sys.stdout.write(f"PROGRESS: {progress}%\n")
-        sys.stdout.flush()
-
-    if cap:
-        cap.release()
-    try:
-        detector.close()
-    except Exception as e:
-        print(f"[WARNING] Exception during detector.close(): {e}")
-
-    return pass_results, width, height
+        return pass_results, width, height
+    finally:
+        # Always release detector and cap, even on early failure. Each is
+        # guarded so an error in one does not mask the other.
+        if cap:
+            try:
+                cap.release()
+            except Exception as e:
+                print(f"[WARNING] Exception during cap.release(): {e}")
+        try:
+            detector.close()
+        except Exception as e:
+            print(f"[WARNING] Exception during detector.close(): {e}")
 
 
 def merge_results(forward_results, backward_results, contours_to_track, landmarks_to_track):
     merged = {}
 
-    # Process contour groups
+    # Process contour groups (point-list averaging)
     for group_name in contours_to_track.keys():
-        merged[group_name] = {}
-        f_frames = forward_results.get(group_name, {})
-        b_frames = backward_results.get(group_name, {})
+        merged[group_name] = _merge_frame_values(
+            forward_results.get(group_name, {}),
+            backward_results.get(group_name, {}),
+            _avg_points
+        )
 
-        all_frames = set(f_frames.keys()).union(b_frames.keys())
-
-        for frame in all_frames:
-            f_val = f_frames.get(frame)
-            b_val = b_frames.get(frame)
-
-            if f_val is not None and b_val is not None:
-                merged_pts = []
-                for p1, p2 in zip(f_val, b_val):
-                    merged_pts.append([
-                        round((p1[0] + p2[0]) / 2.0, 3),
-                        round((p1[1] + p2[1]) / 2.0, 3)
-                    ])
-                merged[group_name][frame] = merged_pts
-            elif f_val is not None:
-                merged[group_name][frame] = f_val
-            elif b_val is not None:
-                merged[group_name][frame] = b_val
-
-    # Process individual landmarks
+    # Process individual landmarks (single-point averaging)
     for name in landmarks_to_track.keys():
-        merged[name] = {}
-        f_frames = forward_results.get(name, {})
-        b_frames = backward_results.get(name, {})
-
-        all_frames = set(f_frames.keys()).union(b_frames.keys())
-
-        for frame in all_frames:
-            f_val = f_frames.get(frame)
-            b_val = b_frames.get(frame)
-
-            if f_val is not None and b_val is not None:
-                merged[name][frame] = [
-                    round((f_val[0] + b_val[0]) / 2.0, 3),
-                    round((f_val[1] + b_val[1]) / 2.0, 3)
-                ]
-            elif f_val is not None:
-                merged[name][frame] = f_val
-            elif b_val is not None:
-                merged[name][frame] = b_val
+        merged[name] = _merge_frame_values(
+            forward_results.get(name, {}),
+            backward_results.get(name, {}),
+            _avg_point
+        )
 
     return merged
 
