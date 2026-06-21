@@ -68,8 +68,8 @@ def find_upstream_read(node):
     return None
 
 
-def get_unique_output_json_path(node):
-    """Ensures and returns a unique output JSON path for the given node to avoid file collisions."""
+def _resolve_output_json_path(node):
+    """Pure resolver: returns the output JSON path for the node without mutating state."""
     # Check if we should write results to a custom file
     write_to_file = node['write_to_file'].value() if 'write_to_file' in node.knobs() else False
 
@@ -84,11 +84,26 @@ def get_unique_output_json_path(node):
     current_val = node['output_json'].value()
     if not current_val or "temp_tracker_data" in current_val:
         directory = os.path.dirname(current_val) if current_val else plugin_dir
-        unique_path = os.path.join(directory, "temp_tracker_data_{}.json".format(node.name())).replace("\\", "/")
-        if current_val != unique_path:
-            node['output_json'].setValue(unique_path)
-        return unique_path
+        return os.path.join(directory, "temp_tracker_data_{}.json".format(node.name())).replace("\\", "/")
     return current_val
+
+
+def _ensure_unique_output_json(node):
+    """Resolves a unique output JSON path and writes it back to the node when stale/empty.
+
+    Only the custom-file (write_to_file) branch mutates the knob, matching the
+    historical behavior of the original get_unique_output_json_path helper.
+    """
+    write_to_file = node['write_to_file'].value() if 'write_to_file' in node.knobs() else False
+    if not write_to_file:
+        # Non-custom path never mutates the knob.
+        return _resolve_output_json_path(node)
+
+    unique_path = _resolve_output_json_path(node)
+    current_val = node['output_json'].value()
+    if current_val != unique_path:
+        node['output_json'].setValue(unique_path)
+    return unique_path
 
 
 def find_vector_channels(node):
@@ -155,13 +170,12 @@ def find_vector_channels(node):
 
 
 
-def set_range_to_input(node):
-    """Callback function to sync the node's frame range to its active upstream input."""
-    input_node = node.input(0)
-    if not input_node:
-        nuke.message("No input node connected to this Face Tracker.\nPlease connect it to a Read node pipeline.")
-        return
+def _resolve_input_frame_range(input_node):
+    """Resolve the effective frame range of an input node.
 
+    Cascades: input first/last -> if degenerate find_upstream_read -> if still 0
+    use root first/last. Returns (start, end).
+    """
     start = int(input_node.firstFrame())
     end = int(input_node.lastFrame())
 
@@ -177,6 +191,18 @@ def set_range_to_input(node):
     if start == end and start == 0:
         start = int(nuke.root().firstFrame())
         end = int(nuke.root().lastFrame())
+
+    return start, end
+
+
+def set_range_to_input(node):
+    """Callback function to sync the node's frame range to its active upstream input."""
+    input_node = node.input(0)
+    if not input_node:
+        nuke.message("No input node connected to this Face Tracker.\nPlease connect it to a Read node pipeline.")
+        return
+
+    start, end = _resolve_input_frame_range(input_node)
 
     node['start_frame'].setValue(start)
     node['end_frame'].setValue(end)
@@ -202,26 +228,11 @@ def get_active_tracker_parts(node):
     return active_parts
 
 
-FALLBACK_ROTO_CONTOUR_KNOB_SPECS = (
-    ("roto_oval", "Face_Oval", "Face Oval (36 pts)       ", True),
-    ("roto_nose_bridge", "Nose_Bridge_Contour", "Nose Bridge (5 pts)", False),
-    ("roto_left_nostril", "Nose_Left_Nostril", "Left Nostril (6 pts)     ", False),
-    ("roto_right_nostril", "Nose_Right_Nostril", "Right Nostril (6 pts)", False),
-    ("roto_lips_outer", "Lips_Outer", "Lips Outer (20 pts)      ", True),
-    ("roto_lips_inner", "Lips_Inner", "Lips Inner (20 pts)", False),
-    ("roto_left_eye", "Left_Eye", "Left Eye (16 pts)        ", False),
-    ("roto_right_eye", "Right_Eye", "Right Eye (16 pts)", False),
-    ("roto_left_iris", "Left_Iris", "Left Iris (4 pts)          ", False),
-    ("roto_right_iris", "Right_Iris", "Right Iris (4 pts)", False),
-    ("roto_left_eyebrow", "Left_Eyebrow", "Left Eyebrow (10 pts)   ", False),
-    ("roto_right_eyebrow", "Right_Eyebrow", "Right Eyebrow (10 pts)", False),
-)
-
-
 def get_roto_contour_knob_specs():
-    if landmarks_config and hasattr(landmarks_config, "ROTO_CONTOUR_KNOB_SPECS"):
-        return landmarks_config.ROTO_CONTOUR_KNOB_SPECS
-    return FALLBACK_ROTO_CONTOUR_KNOB_SPECS
+    # landmarks_config.ROTO_CONTOUR_KNOB_SPECS is the single source of truth. If the
+    # backend import failed (landmarks_config is None) the plugin is non-functional
+    # anyway; the direct dereference fails cleanly, matching the rest of this module.
+    return landmarks_config.ROTO_CONTOUR_KNOB_SPECS
 
 
 ROTO_CONTOUR_OPTIONS = tuple(
@@ -247,12 +258,10 @@ def get_selected_roto_contours(node):
 
 
 def get_names_to_track_for_analysis(node):
-    if hasattr(landmarks_config, "get_landmarks_for_analysis"):
-        selected_names = list(landmarks_config.get_landmarks_for_analysis().keys())
-    else:
-        density = node['landmark_density'].value()
-        active_parts = get_active_tracker_parts(node)
-        selected_names = list(landmarks_config.get_landmarks_for_density(density, active_parts).keys())
+    # get_landmarks_for_analysis() is defined unconditionally in landmarks_config and
+    # takes no arguments; the import-guard (landmarks_config is None) is handled by
+    # run_tracking_on_node before this function is called.
+    selected_names = list(landmarks_config.get_landmarks_for_analysis().keys())
 
     # Roto export choices can be changed after tracking, so record every contour
     # exposed by the Roto tab during analysis and filter only during export.
@@ -261,48 +270,10 @@ def get_names_to_track_for_analysis(node):
     return list(dict.fromkeys(selected_names))
 
 
-def create_face_tracker_node():
-    """Factory function that spawns the FaceTracker custom node on the canvas,
-    populating it with all standard tracking knobs.
-    """
-    # Create Group Node which serves as pass-through
-    node = nuke.createNode('Group')
-    node.setName("FaceTracker", True)
-
-    # Give it a nice, distinctive orange/copper tile color for identification in DAG
-    node['tile_color'].setValue(0xff8c00ff)
-
-    # Setup internal pipeline for the Group node
-    with node:
-        input_source = nuke.createNode('Input', inpanel=False)
-        input_source.setName("Source")
-
-        input_vectors = nuke.createNode('Input', inpanel=False)
-        input_vectors.setName("SmartVector")
-
-        output = nuke.createNode('Output', inpanel=False)
-        output.setInput(0, input_source)
-
-    # 1. Tracking Settings Tab
+def _build_tracking_tab(node, start_frame, end_frame):
+    """Build the 'Analyze Face' tracking settings tab on the node (mutates node)."""
     tracking_tab = nuke.Tab_Knob("tracking_tab", "Analyze Face")
     node.addKnob(tracking_tab)
-
-    # Resolve initial ranges based on selected nodes or project
-    start_frame = 1
-    end_frame = 100
-
-    input_node = node.input(0)
-    if input_node:
-        start_frame = int(input_node.firstFrame())
-        end_frame = int(input_node.lastFrame())
-        if (start_frame == end_frame and start_frame <= 1) or (start_frame == 0 and end_frame == 0):
-            read_node = find_upstream_read(input_node)
-            if read_node:
-                start_frame = int(read_node.firstFrame())
-                end_frame = int(read_node.lastFrame())
-        if start_frame == end_frame and start_frame == 0:
-            start_frame = int(nuke.root().firstFrame())
-            end_frame = int(nuke.root().lastFrame())
 
     # Frame Range Knobs
     start_knob = nuke.Int_Knob("start_frame", "Start Frame")
@@ -366,7 +337,9 @@ def create_face_tracker_node():
     track_btn.setFlag(nuke.STARTLINE)
     node.addKnob(track_btn)
 
-    # 2. Tracker Node Generation Tab
+
+def _build_tracker_tab(node):
+    """Build the 'Tracker' node generation tab on the node (mutates node)."""
     tracker_tab = nuke.Tab_Knob("tracker_tab", "Tracker")
     node.addKnob(tracker_tab)
 
@@ -425,7 +398,9 @@ def create_face_tracker_node():
     create_tracker_btn.setFlag(nuke.STARTLINE)
     node.addKnob(create_tracker_btn)
 
-    # 3. Roto Node Generation Tab
+
+def _build_roto_tab(node):
+    """Build the 'Roto' node generation tab on the node (mutates node)."""
     roto_tab = nuke.Tab_Knob("roto_tab", "Roto")
     node.addKnob(roto_tab)
 
@@ -452,7 +427,9 @@ def create_face_tracker_node():
     create_roto_btn.setFlag(nuke.STARTLINE)
     node.addKnob(create_roto_btn)
 
-    # 4. CornerPin Node Generation Tab
+
+def _build_cornerpin_tab(node):
+    """Build the 'CornerPin' node generation tab on the node (mutates node)."""
     cornerpin_tab = nuke.Tab_Knob("cornerpin_tab", "CornerPin")
     node.addKnob(cornerpin_tab)
 
@@ -471,8 +448,11 @@ def create_face_tracker_node():
     create_cornerpin_btn.setFlag(nuke.STARTLINE)
     node.addKnob(create_cornerpin_btn)
 
-    # Dynamic visibility callback script set on the knobChanged callback
-    knob_changed_script = (
+
+def _build_knob_changed_script():
+    """Return the multi-line knobChanged callback script that drives dynamic knob
+    visibility (anchor_stiffness / info_full_mesh / output_json)."""
+    return (
         "n = nuke.thisNode()\n"
         "k = nuke.thisKnob()\n"
         "if k.name() == 'refine_smartvectors':\n"
@@ -484,28 +464,67 @@ def create_face_tracker_node():
         "elif k.name() == 'write_to_file':\n"
         "    n['output_json'].setVisible(k.value())\n"
     )
-    node['knobChanged'].setValue(knob_changed_script)
+
+
+def create_face_tracker_node():
+    """Factory function that spawns the FaceTracker custom node on the canvas,
+    populating it with all standard tracking knobs.
+    """
+    # Create Group Node which serves as pass-through
+    node = nuke.createNode('Group')
+    node.setName("FaceTracker", True)
+
+    # Give it a nice, distinctive orange/copper tile color for identification in DAG
+    node['tile_color'].setValue(0xff8c00ff)
+
+    # Setup internal pipeline for the Group node
+    with node:
+        input_source = nuke.createNode('Input', inpanel=False)
+        input_source.setName("Source")
+
+        input_vectors = nuke.createNode('Input', inpanel=False)
+        input_vectors.setName("SmartVector")
+
+        output = nuke.createNode('Output', inpanel=False)
+        output.setInput(0, input_source)
+
+    # Resolve initial ranges based on selected nodes or project
+    start_frame = 1
+    end_frame = 100
+
+    input_node = node.input(0)
+    if input_node:
+        start_frame, end_frame = _resolve_input_frame_range(input_node)
+
+    # Build the four tabs in order, then attach the dynamic knobChanged script.
+    _build_tracking_tab(node, start_frame, end_frame)
+    _build_tracker_tab(node)
+    _build_roto_tab(node)
+    _build_cornerpin_tab(node)
+
+    # Dynamic visibility callback script set on the knobChanged callback
+    node['knobChanged'].setValue(_build_knob_changed_script())
 
     # Force the first tab ('Tracking') to be the default active tab on creation
     node.setTab(0)
 
     # Initialize the output JSON path to be unique from the start
-    get_unique_output_json_path(node)
+    _ensure_unique_output_json(node)
 
     return node
 
 
-def run_tracking_on_node(node):
-    """Reads options from the FaceTracker node, processes tracking on a
-    temporarily rendered JPEG stream of the exact input pixel flow (supporting
-    all upstream grades, warps, stabilization, and switch nodes), and saves
-    the keyframed data.
+def _validate_tracking_inputs(node):
+    """Section 1: Pipeline and Refinement Validation.
+
+    Validates the FaceTracker node's inputs and collects every parameter the
+    tracking run needs. Returns a params dict on success, or None after showing
+    a nuke.message explaining the failure.
     """
-    # 1. Pipeline and Refinement Validation
     input_node = node.input(0)
     if not input_node:
         nuke.message("Please connect the Face Tracker node to an input node first.")
-        return False
+        return None
 
     refine_enabled = node['refine_smartvectors'].value()
     backtrack_enabled = node['backtrack'].value() if 'backtrack' in node.knobs() else False
@@ -516,42 +535,64 @@ def run_tracking_on_node(node):
         vector_node = node.input(1)
         if not vector_node:
             nuke.message("SmartVector refinement is enabled but no node is connected to the 'SmartVector' input.")
-            return False
+            return None
         # Validate channels (automatically scan for best vector channels)
         u_channel, v_channel = find_vector_channels(vector_node)
         if not u_channel or not v_channel:
             nuke.message("The connected SmartVector node does not contain any recognizable vector channels.\n"
                          "Expected layers like 'smartvector_fwd', 'smartvector', 'forward', or 'motion' containing .u/.v or .x/.y channels.")
-            return False
+            return None
 
     # Retrieve parameters directly from custom knobs
     start_frame = int(node['start_frame'].value())
     end_frame = int(node['end_frame'].value())
     if start_frame > end_frame:
         nuke.message("Start frame cannot be greater than end frame!")
-        return False
+        return None
 
-    output_json = get_unique_output_json_path(node)
+    output_json = _resolve_output_json_path(node)
     if not output_json:
         nuke.message("Please specify a valid path for the output JSON file.")
-        return False
+        return None
 
     # Resolve all possible landmarks and contours to track everything in one go
     if not landmarks_config:
         nuke.message("Landmarks configuration could not be imported. Please verify backend/landmarks_config.py.")
-        return False
+        return None
 
     selected_names = get_names_to_track_for_analysis(node)
     landmarks_str = ",".join(selected_names)
     if not landmarks_str:
         nuke.message("Please select at least one landmark or contour group to track!")
-        return False
+        return None
 
     # Determine immediate input dimensions for precise viewport scaling
     width = input_node.format().width()
     height = input_node.format().height()
 
-    # 2. Locate Virtual Environment Python
+    return {
+        'node': node,
+        'input_node': input_node,
+        'refine_enabled': refine_enabled,
+        'backtrack_enabled': backtrack_enabled,
+        'vector_node': vector_node,
+        'u_channel': u_channel,
+        'v_channel': v_channel,
+        'start_frame': start_frame,
+        'end_frame': end_frame,
+        'output_json': output_json,
+        'landmarks_str': landmarks_str,
+        'width': width,
+        'height': height,
+    }
+
+
+def _locate_venv_python():
+    """Section 2: Locate Virtual Environment Python.
+
+    Returns the venv python executable path, or None after showing a
+    nuke.message when the interpreter is missing.
+    """
     if sys.platform == "win32":
         python_exe = os.path.join(plugin_dir, ".venv", "Scripts", "python.exe")
     else:
@@ -559,11 +600,20 @@ def run_tracking_on_node(node):
 
     if not os.path.exists(python_exe):
         nuke.message(f"Virtual environment python not found at:\n{python_exe}\n\nPlease run 'install_requirements.bat' to set it up.")
-        return False
+        return None
+    return python_exe
 
+
+def _build_backend_command(params):
+    """Section 3: Compile backend parameters.
+
+    Builds the base argv list for the tracker_backend subprocess from the
+    validated params dict. Reads mode/quality/fps off params['node'] and uses
+    params['python_exe'] / params['temp_file_pattern'] for the invocation.
+    """
+    node = params['node']
     backend_script = os.path.join(plugin_dir, "backend", "tracker_backend.py")
 
-    # 3. Compile backend parameters
     mode_val = "video" if "Video" in node['mode'].value() else "image"
 
     quality_val = node['quality'].value()
@@ -583,8 +633,239 @@ def run_tracking_on_node(node):
     except Exception:
         pass
 
-    # 4. Set up temporary render directory for active image stream caching
-    # Dynamically query Nuke's native temp directory to respect custom fast scratch disks
+    return [
+        params['python_exe'],
+        backend_script,
+        "--input", params['temp_file_pattern'],
+        "--start", str(params['start_frame']),
+        "--end", str(params['end_frame']),
+        "--width", str(params['width']),
+        "--height", str(params['height']),
+        "--landmarks", params['landmarks_str'],
+        "--export-type", "trackers",
+        "--mode", mode_val,
+        "--fps", str(nuke_fps),
+        "--min-det-confidence", str(min_det_conf),
+        "--min-track-confidence", str(min_track_conf),
+    ]
+
+
+def _render_input_stream(node, start_frame, end_frame, temp_file_pattern):
+    """Section 4: Set up temporary render directory (Write node + synchronous render).
+
+    Creates a temporary Write node inside the FaceTracker Group context, points
+    it at the JPEG temp render pattern, and synchronously renders the active
+    image stream. Returns the Write node so the caller can delete it in its
+    finally block. Raises on missing internal Source node.
+    """
+    # Create temporary Write node inside the Group context to render the active stream
+    with node:
+        internal_source = node.node("Source")
+        if not internal_source:
+            raise ValueError("Internal 'Source' input node not found within FaceTracker Group.")
+
+        write_node = nuke.nodes.Write()
+        write_node.setInput(0, internal_source)
+        write_node['file'].setValue(temp_file_pattern)
+        write_node['file_type'].setValue('jpeg')
+
+        # Set JPEG quality to high to preserve fine details for landmark detection
+        if 'quality' in write_node.knobs():
+            write_node['quality'].setValue(0.9)
+        elif '_jpeg_quality' in write_node.knobs():
+            write_node['_jpeg_quality'].setValue(0.9)
+
+    # Synchronously execute the temporary render in Nuke
+    nuke.execute(write_node, start_frame, end_frame)
+    return write_node
+
+
+def _run_tracking_passes(passes_to_run, task, start_frame, end_frame):
+    """Run the backend subprocess passes sequentially, parsing progress output.
+
+    Keeps the N3 non-blocking stdout reader (daemon thread + queue) so the Nuke
+    Cancel button stays responsive even when the backend stalls. Returns True
+    when every pass succeeds, False (after nuke.message) on failure or cancel.
+    """
+    # Hide console terminal window on Windows platforms
+    startupinfo = None
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0  # SW_HIDE
+
+    # Execute each pass sequentially
+    for p_info in passes_to_run:
+        task.setMessage(f"Initializing face detection engine ({p_info['name']} pass)...")
+
+        try:
+            process = subprocess.Popen(
+                p_info["cmd"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                startupinfo=startupinfo,
+                bufsize=1
+            )
+        except Exception as e:
+            nuke.message(f"Failed to start backend subprocess for {p_info['name']} pass:\n{str(e)}")
+            return False
+
+        error_logs = []
+        pass_success = False
+
+        # N3: Read subprocess stdout from a daemon thread into a queue so the
+        # Nuke main thread can poll with a short timeout. This keeps the Cancel
+        # button responsive even when the backend stalls and produces no output
+        # (a blocking readline() would otherwise freeze Nuke's UI indefinitely).
+        import threading
+        import queue as _queue
+
+        stdout_q = _queue.Queue()
+
+        def _stdout_reader(stream, q):
+            try:
+                for line in iter(stream.readline, ""):
+                    q.put(line)
+            except Exception:
+                pass
+            finally:
+                # Sentinel: stdout closed (EOF) or reader failed.
+                q.put(None)
+
+        reader_thread = threading.Thread(target=_stdout_reader, args=(process.stdout, stdout_q))
+        reader_thread.daemon = True
+        reader_thread.start()
+
+        while True:
+            if task.isCancelled():
+                # B2: terminate, then wait for the child to actually exit so it
+                # cannot keep holding the output JSON files open when the finally
+                # block runs shutil.rmtree(temp_dir). On Windows TerminateProcess
+                # is async, so we must wait; escalate to kill if it hangs.
+                process.terminate()
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
+                nuke.message("Face tracking cancelled by user.")
+                return False
+
+            try:
+                line = stdout_q.get(timeout=0.1)
+            except _queue.Empty:
+                line = None
+
+            if line is None:
+                # Sentinel: reader thread hit EOF (or failed). If we already
+                # consumed all output this is the normal end-of-stream signal.
+                break
+
+            line = line.strip()
+            print(f"[MediaPipe Backend {p_info['name']}] {line}")
+
+            if "[ERROR]" in line or "Error:" in line or "Traceback" in line:
+                error_logs.append(line)
+
+            if line.startswith("PROGRESS:"):
+                match = re.search(r'PROGRESS:\s*(\d+)%', line)
+                if match:
+                    progress_val = int(match.group(1))
+                    mapped_progress = int(p_info["offset"] * 100 + progress_val * p_info["weight"])
+                    task.setProgress(mapped_progress)
+                    task.setMessage(f"Tracking face ({p_info['name']})... frames {start_frame}-{end_frame} ({progress_val}%)")
+            elif line.startswith("[INFO]"):
+                task.setMessage(line)
+            elif line.startswith("[SUCCESS]"):
+                pass_success = True
+                task.setMessage(line)
+
+        process.wait()
+
+        if process.returncode != 0 or not pass_success:
+            err_msg = "\n".join(error_logs[-10:]) if error_logs else "Unknown error occurred in the background process."
+            nuke.message(f"Backend {p_info['name']} pass failed (Exit Code: {process.returncode}):\n\n{err_msg}")
+            return False
+
+    return True
+
+
+def _merge_backtrack_passes(output_fwd, output_bwd, output_json, task):
+    """Merge forward/backward tracking JSON outputs via tracker_backend.merge_results.
+
+    Returns True on success, False (after nuke.message) on any read/merge/write
+    failure. The merged result is written to output_json.
+    """
+    task.setMessage("Merging forward and backward tracking results...")
+
+    try:
+        with open(output_fwd, "r") as f:
+            fwd_data = json.load(f)
+    except Exception as e:
+        nuke.message(f"Failed to read forward tracking JSON for merging:\n{str(e)}")
+        return False
+
+    try:
+        with open(output_bwd, "r") as f:
+            bwd_data = json.load(f)
+    except Exception as e:
+        nuke.message(f"Failed to read backward tracking JSON for merging:\n{str(e)}")
+        return False
+
+    if not tracker_backend or not landmarks_config:
+        nuke.message("Failed to reference backend modules (tracker_backend or landmarks_config) for merging.")
+        return False
+
+    try:
+        contours_to_track = dict(landmarks_config.CONTOUR_GROUPS)
+        landmarks_to_track = landmarks_config.get_landmarks_for_analysis()
+
+        merged_data = tracker_backend.merge_results(
+            fwd_data,
+            bwd_data,
+            contours_to_track,
+            landmarks_to_track
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        nuke.message(f"Error during results merging:\n{str(e)}")
+        return False
+
+    try:
+        os.makedirs(os.path.dirname(output_json), exist_ok=True)
+        with open(output_json, "w") as f:
+            json.dump(merged_data, f, indent=2)
+    except Exception as e:
+        nuke.message(f"Failed to save merged tracking JSON:\n{str(e)}")
+        return False
+
+    return True
+
+
+def run_tracking_on_node(node):
+    """Reads options from the FaceTracker node, processes tracking on a
+    temporarily rendered JPEG stream of the exact input pixel flow (supporting
+    all upstream grades, warps, stabilization, and switch nodes), and saves
+    the keyframed data.
+    """
+    # 1. Pipeline and Refinement Validation
+    params = _validate_tracking_inputs(node)
+    if params is None:
+        return False
+
+    # 2. Locate Virtual Environment Python
+    python_exe = _locate_venv_python()
+    if python_exe is None:
+        return False
+    params['python_exe'] = python_exe
+
+    # 4. Set up temporary render directory for active image stream caching.
+    # Dynamically query Nuke's native temp directory to respect custom fast scratch disks.
     try:
         nuke_temp = nuke.temp_dir()
     except Exception:
@@ -594,10 +875,17 @@ def run_tracking_on_node(node):
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     temp_dir = tempfile.mkdtemp(dir=nuke_temp, prefix=f"nuke_facetracker_{timestamp}_")
     temp_file_pattern = os.path.join(temp_dir, "frame_%04d.jpg").replace("\\", "/")
+    params['temp_file_pattern'] = temp_file_pattern
 
     # Trigger Subprocess tracking with a native Nuke progress modal
     task = nuke.ProgressTask("MediaPipe Face Tracker")
     task.setMessage("Rendering active image stream to temporary cache...")
+
+    start_frame = params['start_frame']
+    end_frame = params['end_frame']
+    output_json = params['output_json']
+    backtrack_enabled = params['backtrack_enabled']
+    refine_enabled = params['refine_enabled']
 
     output_fwd = None
     output_bwd = None
@@ -605,46 +893,14 @@ def run_tracking_on_node(node):
     success = False
 
     try:
-        # Create temporary Write node inside the Group context to render the active stream
-        with node:
-            internal_source = node.node("Source")
-            if not internal_source:
-                raise ValueError("Internal 'Source' input node not found within FaceTracker Group.")
-
-            write_node = nuke.nodes.Write()
-            write_node.setInput(0, internal_source)
-            write_node['file'].setValue(temp_file_pattern)
-            write_node['file_type'].setValue('jpeg')
-
-            # Set JPEG quality to high to preserve fine details for landmark detection
-            if 'quality' in write_node.knobs():
-                write_node['quality'].setValue(0.9)
-            elif '_jpeg_quality' in write_node.knobs():
-                write_node['_jpeg_quality'].setValue(0.9)
-
-        # Synchronously execute the temporary render in Nuke
-        nuke.execute(write_node, start_frame, end_frame)
+        write_node = _render_input_stream(node, start_frame, end_frame, temp_file_pattern)
 
         # Setup output paths for dual-pass tracking if backtrack is enabled (stored inside temp_dir)
         output_fwd = os.path.join(temp_dir, "output_fwd.json").replace("\\", "/")
         output_bwd = os.path.join(temp_dir, "output_bwd.json").replace("\\", "/")
 
-        # Setup base subprocess command referencing the temporary JPEGs
-        base_cmd = [
-            python_exe,
-            backend_script,
-            "--input", temp_file_pattern,
-            "--start", str(start_frame),
-            "--end", str(end_frame),
-            "--width", str(width),
-            "--height", str(height),
-            "--landmarks", landmarks_str,
-            "--export-type", "trackers",
-            "--mode", mode_val,
-            "--fps", str(nuke_fps),
-            "--min-det-confidence", str(min_det_conf),
-            "--min-track-confidence", str(min_track_conf)
-        ]
+        # 3. Compile backend parameters
+        base_cmd = _build_backend_command(params)
 
         # Compile list of tracking passes to run
         passes_to_run = []
@@ -674,118 +930,13 @@ def run_tracking_on_node(node):
                 "output": output_json
             })
 
-        # Hide console terminal window on Windows platforms
-        startupinfo = None
-        if sys.platform == "win32":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = 0 # SW_HIDE
-
-        # Execute each pass sequentially
-        for p_idx, p_info in enumerate(passes_to_run):
-            task.setMessage(f"Initializing face detection engine ({p_info['name']} pass)...")
-
-            try:
-                process = subprocess.Popen(
-                    p_info["cmd"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    universal_newlines=True,
-                    startupinfo=startupinfo,
-                    bufsize=1
-                )
-            except Exception as e:
-                nuke.message(f"Failed to start backend subprocess for {p_info['name']} pass:\n{str(e)}")
-                return False
-
-            error_logs = []
-            pass_success = False
-
-            while True:
-                if task.isCancelled():
-                    process.terminate()
-                    nuke.message("Face tracking cancelled by user.")
-                    return False
-
-                line = process.stdout.readline()
-                if not line:
-                    break
-
-                line = line.strip()
-                print(f"[MediaPipe Backend {p_info['name']}] {line}")
-
-                if "[ERROR]" in line or "Error:" in line or "Traceback" in line:
-                    error_logs.append(line)
-
-                if line.startswith("PROGRESS:"):
-                    match = re.search(r'PROGRESS:\s*(\d+)%', line)
-                    if match:
-                        progress_val = int(match.group(1))
-                        mapped_progress = int(p_info["offset"] * 100 + progress_val * p_info["weight"])
-                        task.setProgress(mapped_progress)
-                        task.setMessage(f"Tracking face ({p_info['name']})... frames {start_frame}-{end_frame} ({progress_val}%)")
-                elif line.startswith("[INFO]"):
-                    task.setMessage(line)
-                elif line.startswith("[SUCCESS]"):
-                    pass_success = True
-                    task.setMessage(line)
-
-            process.wait()
-
-            if process.returncode != 0 or not pass_success:
-                err_msg = "\n".join(error_logs[-10:]) if error_logs else "Unknown error occurred in the background process."
-                nuke.message(f"Backend {p_info['name']} pass failed (Exit Code: {process.returncode}):\n\n{err_msg}")
-                return False
+        # Execute passes sequentially
+        if not _run_tracking_passes(passes_to_run, task, start_frame, end_frame):
+            return False
 
         # If backtracking was enabled, merge the two JSON outputs
         if backtrack_enabled:
-            task.setMessage("Merging forward and backward tracking results...")
-
-            try:
-                with open(output_fwd, "r") as f:
-                    fwd_data = json.load(f)
-            except Exception as e:
-                nuke.message(f"Failed to read forward tracking JSON for merging:\n{str(e)}")
-                return False
-
-            try:
-                with open(output_bwd, "r") as f:
-                    bwd_data = json.load(f)
-            except Exception as e:
-                nuke.message(f"Failed to read backward tracking JSON for merging:\n{str(e)}")
-                return False
-
-            if not tracker_backend or not landmarks_config:
-                nuke.message("Failed to reference backend modules (tracker_backend or landmarks_config) for merging.")
-                return False
-
-            try:
-                contours_to_track = dict(landmarks_config.CONTOUR_GROUPS)
-                if hasattr(landmarks_config, "get_landmarks_for_analysis"):
-                    landmarks_to_track = landmarks_config.get_landmarks_for_analysis()
-                else:
-                    selected_landmarks_list = [name.strip() for name in landmarks_str.split(",") if name.strip()]
-                    individual_names = [name for name in selected_landmarks_list if name not in landmarks_config.CONTOUR_GROUPS]
-                    landmarks_to_track = landmarks_config.get_landmarks_by_names(individual_names)
-
-                merged_data = tracker_backend.merge_results(
-                    fwd_data,
-                    bwd_data,
-                    contours_to_track,
-                    landmarks_to_track
-                )
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                nuke.message(f"Error during results merging:\n{str(e)}")
-                return False
-
-            try:
-                os.makedirs(os.path.dirname(output_json), exist_ok=True)
-                with open(output_json, "w") as f:
-                    json.dump(merged_data, f, indent=2)
-            except Exception as e:
-                nuke.message(f"Failed to save merged tracking JSON:\n{str(e)}")
+            if not _merge_backtrack_passes(output_fwd, output_bwd, output_json, task):
                 return False
 
         success = True
@@ -800,7 +951,7 @@ def run_tracking_on_node(node):
                 nuke.message(f"Failed to read tracking JSON for refinement:\n{str(e)}")
                 return False
 
-            success_refine = apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_channel, v_channel, task)
+            success_refine = apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, params['u_channel'], params['v_channel'], task)
             if not success_refine:
                 return False
 
@@ -875,6 +1026,56 @@ def get_landmarks_bbox(tracker_data, frame, width, height, padding=50):
     return [x_min, y_min, x_max, y_max]
 
 
+def _init_or_get_prev(track_name, frame_data, frame_str):
+    """Initialize a previous_refined entry from raw tracker data at frame_str.
+
+    Returns a deep-ish copy of the frame value (list of points or single point),
+    or None when frame_str is not present in frame_data.
+    """
+    if frame_str not in frame_data:
+        return None
+    val = frame_data[frame_str]
+    if isinstance(val[0], list):
+        # Roto group: list of points
+        return [list(pt) for pt in val]
+    # Tracker point
+    return list(val)
+
+
+def _refine_point(prev_xy, mp_xy, u, v, w):
+    """Spring-anchor blend: advect prev by motion (u, v), then pull toward the
+    MediaPipe anchor mp_xy by stiffness w. Returns [x_ref, y_ref] (rounded)."""
+    x_prev, y_prev = prev_xy[0], prev_xy[1]
+    x_motion = x_prev + u
+    y_motion = y_prev + v
+    if mp_xy is not None:
+        x_mp, y_mp = mp_xy[0], mp_xy[1]
+        x_ref = (1.0 - w) * x_motion + w * x_mp
+        y_ref = (1.0 - w) * y_motion + w * y_mp
+    else:
+        x_ref = x_motion
+        y_ref = y_motion
+    return [round(x_ref, 3), round(y_ref, 3)]
+
+
+def _refine_point_list(prev_pts, mp_pts, vector_node, u_channel, v_channel, w,
+                       track_name=None, frame=None, start_frame=None):
+    """Refine a contour (list of points) sampling motion vectors per point."""
+    refined_pts = []
+    for idx, pt in enumerate(prev_pts):
+        x_prev, y_prev = pt[0], pt[1]
+        u = vector_node.sample(u_channel, x_prev + 0.5, y_prev + 0.5)
+        v = vector_node.sample(v_channel, x_prev + 0.5, y_prev + 0.5)
+
+        if frame is not None and start_frame is not None and frame < start_frame + 6 and idx == 0:
+            print(f"[SmartVector Refine] Frame {frame} - Roto '{track_name}' sampled motion: ({u:.4f}, {v:.4f})")
+
+        mp_xy = mp_pts[idx] if (mp_pts and idx < len(mp_pts)) else None
+        refined_pts.append(_refine_point(pt, mp_xy, u, v, w))
+
+    return refined_pts
+
+
 def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_channel=None, v_channel=None, task=None):
     """Applies the Spring-Anchor blending algorithm to refine MediaPipe landmark
     coordinates using local motion vectors from the connected SmartVector node.
@@ -928,127 +1129,106 @@ def apply_smartvector_refinement(node, tracker_data, start_frame, end_frame, u_c
     # Initialize previous_refined at the first frame of tracking
     first_frame_str = str(start_frame)
     for track_name, frame_data in tracker_data.items():
-        if first_frame_str in frame_data:
-            val = frame_data[first_frame_str]
-            if isinstance(val[0], list):
-                # Roto group: list of points
-                previous_refined[track_name] = [list(pt) for pt in val]
-            else:
-                # Tracker point
-                previous_refined[track_name] = list(val)
+        init_val = _init_or_get_prev(track_name, frame_data, first_frame_str)
+        if init_val is not None:
+            previous_refined[track_name] = init_val
+
+    # B3: Track whether force_node has already been deleted by an earlier cleanup
+    # path (cancel/success) so the finally below does not double-delete it.
+    force_node_deleted = False
 
     # Chronological loop
-    for f_idx, frame in enumerate(range(start_frame + 1, end_frame + 1)):
-        if task and task.isCancelled():
+    try:
+        for f_idx, frame in enumerate(range(start_frame + 1, end_frame + 1)):
+            if task and task.isCancelled():
+                if force_node and not force_node_deleted:
+                    try:
+                        nuke.delete(force_node)
+                        force_node_deleted = True
+                    except Exception:
+                        pass
+                nuke.frame(orig_frame)
+                nuke.message("SmartVector refinement cancelled by user.")
+                return False
+
+            # Force evaluate upstream vector node at frame f-1
             if force_node:
                 try:
-                    nuke.delete(force_node)
-                except Exception:
+                    # Calculate dynamic bounding box of all landmarks on frame f-1 to restrict evaluation area
+                    bbox = get_landmarks_bbox(tracker_data, frame - 1, width, height)
+                    force_node["ROI"].setValue(bbox)
+                    nuke.execute(force_node, frame - 1, frame - 1)
+                except Exception as e:
                     pass
-            nuke.frame(orig_frame)
-            nuke.message("SmartVector refinement cancelled by user.")
-            return False
 
-        # Force evaluate upstream vector node at frame f-1
-        if force_node:
-            try:
-                # Calculate dynamic bounding box of all landmarks on frame f-1 to restrict evaluation area
-                bbox = get_landmarks_bbox(tracker_data, frame - 1, width, height)
-                force_node["ROI"].setValue(bbox)
-                nuke.execute(force_node, frame - 1, frame - 1)
-            except Exception as e:
-                pass
+            # Evaluate upstream vectors at frame f-1 to compute motion to frame f
+            nuke.frame(frame - 1)
+            frame_str = str(frame)
 
-        # Evaluate upstream vectors at frame f-1 to compute motion to frame f
-        nuke.frame(frame - 1)
-        frame_str = str(frame)
+            for track_name, frame_data in tracker_data.items():
+                if track_name not in previous_refined:
+                    init_val = _init_or_get_prev(track_name, frame_data, frame_str)
+                    if init_val is not None:
+                        previous_refined[track_name] = init_val
+                    continue
 
-        for track_name, frame_data in tracker_data.items():
-            if track_name not in previous_refined:
-                if frame_str in frame_data:
-                    val = frame_data[frame_str]
-                    if isinstance(val[0], list):
-                        previous_refined[track_name] = [list(pt) for pt in val]
-                    else:
-                        previous_refined[track_name] = list(val)
-                continue
+                prev_val = previous_refined[track_name]
 
-            prev_val = previous_refined[track_name]
+                if isinstance(prev_val[0], list):
+                    # Roto group: list of points
+                    mp_pts = frame_data.get(frame_str)
+                    refined_pts = _refine_point_list(
+                        prev_val, mp_pts, vector_node, u_channel, v_channel, w,
+                        track_name=track_name, frame=frame, start_frame=start_frame,
+                    )
+                    frame_data[frame_str] = refined_pts
+                    previous_refined[track_name] = refined_pts
 
-            if isinstance(prev_val[0], list):
-                # Roto group: list of points
-                refined_pts = []
-                mp_pts = frame_data.get(frame_str)
+                else:
+                    # Tracker point
+                    x_prev, y_prev = prev_val[0], prev_val[1]
 
-                for idx, pt in enumerate(prev_val):
-                    x_prev, y_prev = pt[0], pt[1]
-
-                    # Sample motion vectors with standard pixel center offset
                     u = vector_node.sample(u_channel, x_prev + 0.5, y_prev + 0.5)
                     v = vector_node.sample(v_channel, x_prev + 0.5, y_prev + 0.5)
 
-                    if frame < start_frame + 6 and idx == 0:
-                        print(f"[SmartVector Refine] Frame {frame} - Roto '{track_name}' sampled motion: ({u:.4f}, {v:.4f})")
+                    if frame < start_frame + 6:
+                        print(f"[SmartVector Refine] Frame {frame} - Tracker '{track_name}' sampled motion: ({u:.4f}, {v:.4f})")
 
-                    # Advection
-                    x_motion = x_prev + u
-                    y_motion = y_prev + v
+                    mp_pt = frame_data.get(frame_str)
+                    refined_pt = _refine_point(prev_val, mp_pt, u, v, w)
 
-                    # Correction
-                    if mp_pts and idx < len(mp_pts):
-                        x_mp, y_mp = mp_pts[idx][0], mp_pts[idx][1]
-                        x_ref = (1.0 - w) * x_motion + w * x_mp
-                        y_ref = (1.0 - w) * y_motion + w * y_mp
-                    else:
-                        x_ref = x_motion
-                        y_ref = y_motion
+                    frame_data[frame_str] = refined_pt
+                    previous_refined[track_name] = refined_pt
 
-                    refined_pts.append([round(x_ref, 3), round(y_ref, 3)])
+            if task:
+                progress_pct = 80 + int((f_idx + 1) / float(total_frames) * 20)
+                task.setProgress(progress_pct)
+                task.setMessage(f"Refining coordinates... frame {frame} of {end_frame} ({progress_pct}%)")
 
-                frame_data[frame_str] = refined_pts
-                previous_refined[track_name] = refined_pts
+        # Cleanup temporary force node
+        if force_node and not force_node_deleted:
+            try:
+                nuke.delete(force_node)
+                force_node_deleted = True
+            except Exception:
+                pass
 
-            else:
-                # Tracker point
-                x_prev, y_prev = prev_val[0], prev_val[1]
-
-                u = vector_node.sample(u_channel, x_prev + 0.5, y_prev + 0.5)
-                v = vector_node.sample(v_channel, x_prev + 0.5, y_prev + 0.5)
-
-                if frame < start_frame + 6:
-                    print(f"[SmartVector Refine] Frame {frame} - Tracker '{track_name}' sampled motion: ({u:.4f}, {v:.4f})")
-
-                x_motion = x_prev + u
-                y_motion = y_prev + v
-
-                mp_pt = frame_data.get(frame_str)
-                if mp_pt:
-                    x_mp, y_mp = mp_pt[0], mp_pt[1]
-                    x_ref = (1.0 - w) * x_motion + w * x_mp
-                    y_ref = (1.0 - w) * y_motion + w * y_mp
-                else:
-                    x_ref = x_motion
-                    y_ref = y_motion
-
-                refined_pt = [round(x_ref, 3), round(y_ref, 3)]
-
-                frame_data[frame_str] = refined_pt
-                previous_refined[track_name] = refined_pt
-
-        if task:
-            progress_pct = 80 + int((f_idx + 1) / float(total_frames) * 20)
-            task.setProgress(progress_pct)
-            task.setMessage(f"Refining coordinates... frame {frame} of {end_frame} ({progress_pct}%)")
-
-    # Cleanup temporary force node
-    if force_node:
+        nuke.frame(orig_frame)
+        return True
+    finally:
+        # B3: On ANY exception (or early return paths above) make sure the
+        # temporary CurveTool force_node is removed and the current frame is
+        # restored, so we never orphan force_node in the user's group DAG or
+        # leave the timeline stuck. Do not swallow the exception — re-raise.
+        if force_node and not force_node_deleted:
+            try:
+                nuke.delete(force_node)
+            except Exception:
+                pass
         try:
-            nuke.delete(force_node)
+            nuke.frame(orig_frame)
         except Exception:
             pass
-
-    nuke.frame(orig_frame)
-    return True
 
 
 def interpolate_missing_frames(frame_data, start_frame, end_frame):
@@ -1124,13 +1304,10 @@ def calculate_cornerpin_data(tracker_data, start_frame, end_frame, width=1920, h
     for name, data in tracker_data.items():
         if not data:
             continue
-        first_val = list(data.values())[0]
-        if isinstance(first_val[0], list):
-            # Contour group
-            interpolated_tracks[name] = interpolate_missing_frames(data, start_frame, end_frame)
-        else:
-            # Single landmark
-            interpolated_tracks[name] = interpolate_missing_frames(data, start_frame, end_frame)
+        # interpolate_missing_frames detects the single-point vs list-of-points
+        # format internally, so both contour groups and single landmarks share
+        # one code path here.
+        interpolated_tracks[name] = interpolate_missing_frames(data, start_frame, end_frame)
 
     bbox_per_frame = {}
     for frame in range(start_frame, end_frame + 1):
@@ -1209,17 +1386,27 @@ def calculate_cornerpin_data(tracker_data, start_frame, end_frame, width=1920, h
     return bbox_per_frame
 
 
-def generate_cornerpin_node(parent_node, json_path, width, height):
-    """Loads JSON tracking results, calculates bounding boxes, and generates an animated CornerPin2D node."""
-    if not os.path.exists(json_path):
-        nuke.message(f"Output JSON file not found:\n{json_path}")
-        return False
+def _load_tracker_json(json_path):
+    """Load a tracker JSON file.
 
+    Returns (data, None) on success or (None, error_msg) when the file is
+    missing or cannot be parsed. Callers are responsible for presenting the
+    error_msg to the user via nuke.message and returning False.
+    """
+    if not os.path.exists(json_path):
+        return None, f"Output JSON file not found:\n{json_path}"
     try:
         with open(json_path, "r") as f:
-            tracker_data = json.load(f)
+            return json.load(f), None
     except Exception as e:
-        nuke.message(f"Failed to parse JSON file:\n{str(e)}")
+        return None, f"Failed to parse JSON file:\n{str(e)}"
+
+
+def generate_cornerpin_node(parent_node, json_path, width, height):
+    """Loads JSON tracking results, calculates bounding boxes, and generates an animated CornerPin2D node."""
+    tracker_data, err = _load_tracker_json(json_path)
+    if err is not None:
+        nuke.message(err)
         return False
 
     try:
@@ -1238,14 +1425,17 @@ def generate_cornerpin_node(parent_node, json_path, width, height):
     ref_clamped = max(start_frame, min(end_frame, ref_frame))
     ref_bbox = bbox_per_frame.get(ref_clamped, [[0, 0], [width, 0], [width, height], [0, height]])
 
+    # N4: Resolve the parent group BEFORE deselecting, then deselect inside that
+    # group so nodes nested within the FaceTracker's parent are deselected too.
+    parent_group = parent_node.parent()
+
     # Deselect all nodes to cleanly connect the new CornerPin2D node
-    for n in nuke.allNodes():
+    for n in nuke.allNodes(parent_group):
         n.setSelected(False)
 
     parent_node.setSelected(True)
 
     # Create the CornerPin2D Node in the parent canvas context
-    parent_group = parent_node.parent()
     with parent_group:
         cornerpin = nuke.createNode('CornerPin2D')
     cornerpin.setName(f"CornerPin_Face_{parent_node.name()}")
@@ -1296,18 +1486,13 @@ def _get_contour_point_spec(point_name):
     if not landmarks_config:
         return None, None
 
-    for group_name, indices in landmarks_config.CONTOUR_GROUPS.items():
-        prefix = group_name + "_"
-        if point_name.startswith(prefix):
-            try:
-                point_index = int(point_name[len(prefix):])
-            except Exception:
-                return None, None
-
-            if 0 <= point_index < len(indices):
-                return group_name, point_index
-
-    return None, None
+    # landmarks_config.resolve_contour_point parses the GroupName_N convention and
+    # returns (group_name, idx_in_group) where idx_in_group is the 0-based position
+    # within the group's point list -- exactly the per-frame contour track index.
+    resolved = landmarks_config.resolve_contour_point(point_name)
+    if resolved is None:
+        return None, None
+    return resolved
 
 
 def _extract_contour_point_track(contour_data, point_index):
@@ -1364,17 +1549,50 @@ def _dedupe_landmark_names_by_index(resolved_landmarks):
     return selected_names
 
 
+# Tracker4 database column schema. Hoisted out of generate_tracker_node so the
+# generator body stays focused on track serialization.
+TRACKER4_COLUMN_DEFINITIONS = (
+    "{\n"
+    " { 5 1 20 enable e 1 }\n"
+    " { 3 1 75 name name 1 }\n"
+    " { 2 1 58 track_x track_x 1 }\n"
+    " { 2 1 58 track_y track_y 1 }\n"
+    " { 2 1 63 offset_x offset_x 1 }\n"
+    " { 2 1 63 offset_y offset_y 1 }\n"
+    " { 4 1 27 T T 1 }\n"
+    " { 4 1 27 R R 1 }\n"
+    " { 4 1 27 S S 1 }\n"
+    " { 2 0 45 error error 1 }\n"
+    " { 1 1 0 error_min error_min 1 }\n"
+    " { 1 1 0 error_max error_max 1 }\n"
+    " { 1 1 0 pattern_x pattern_x 1 }\n"
+    " { 1 1 0 pattern_y pattern_y 1 }\n"
+    " { 1 1 0 pattern_r pattern_r 1 }\n"
+    " { 1 1 0 pattern_t pattern_t 1 }\n"
+    " { 1 1 0 search_x search_x 1 }\n"
+    " { 1 1 0 search_y search_y 1 }\n"
+    " { 1 1 0 search_r search_r 1 }\n"
+    " { 1 1 0 search_t search_t 1 }\n"
+    " { 2 1 0 key_track key_track 1 }\n"
+    " { 2 1 0 key_search_x key_search_x 1 }\n"
+    " { 2 1 0 key_search_y key_search_y 1 }\n"
+    " { 2 1 0 key_search_r key_search_r 1 }\n"
+    " { 2 1 0 key_search_t key_search_t 1 }\n"
+    " { 2 1 0 key_track_x key_track_x 1 }\n"
+    " { 2 1 0 key_track_y key_track_y 1 }\n"
+    " { 2 1 0 key_track_r key_track_r 1 }\n"
+    " { 2 1 0 key_track_t key_track_t 1 }\n"
+    " { 2 1 0 key_centre_offset_x key_centre_offset_x 1 }\n"
+    " { 2 1 0 key_centre_offset_y key_centre_offset_y 1 }\n"
+    "}"
+)
+
+
 def generate_tracker_node(parent_node, json_path, width, height):
     """Loads JSON tracking results and serializes them into a keyframed Nuke Tracker4 node."""
-    if not os.path.exists(json_path):
-        nuke.message(f"Output JSON file not found:\n{json_path}")
-        return False
-
-    try:
-        with open(json_path, "r") as f:
-            tracker_data = json.load(f)
-    except Exception as e:
-        nuke.message(f"Failed to parse JSON file:\n{str(e)}")
+    tracker_data, err = _load_tracker_json(json_path)
+    if err is not None:
+        nuke.message(err)
         return False
 
     # Resolve selected landmarks based on CURRENT options in the properties panel
@@ -1423,54 +1641,20 @@ def generate_tracker_node(parent_node, json_path, width, height):
         nuke.message("Please select at least one tracking landmark to export, or ensure you have tracked first.")
         return False
 
+    # N4: Resolve the parent group BEFORE deselecting, then deselect inside that
+    # group so nodes nested within the FaceTracker's parent are deselected too.
+    parent_group = parent_node.parent()
+
     # Deselect all nodes to cleanly connect the new Tracker4 node to our custom node
-    for n in nuke.allNodes():
+    for n in nuke.allNodes(parent_group):
         n.setSelected(False)
 
     parent_node.setSelected(True)
 
     # Create the Tracker4 Node in the parent canvas context
-    parent_group = parent_node.parent()
     with parent_group:
         tracker = nuke.createNode('Tracker4')
     tracker.setName(f"Tracker_Face_{parent_node.name()}")
-
-    # Define Tracker4 database columns
-    column_definitions = (
-        "{\n"
-        " { 5 1 20 enable e 1 }\n"
-        " { 3 1 75 name name 1 }\n"
-        " { 2 1 58 track_x track_x 1 }\n"
-        " { 2 1 58 track_y track_y 1 }\n"
-        " { 2 1 63 offset_x offset_x 1 }\n"
-        " { 2 1 63 offset_y offset_y 1 }\n"
-        " { 4 1 27 T T 1 }\n"
-        " { 4 1 27 R R 1 }\n"
-        " { 4 1 27 S S 1 }\n"
-        " { 2 0 45 error error 1 }\n"
-        " { 1 1 0 error_min error_min 1 }\n"
-        " { 1 1 0 error_max error_max 1 }\n"
-        " { 1 1 0 pattern_x pattern_x 1 }\n"
-        " { 1 1 0 pattern_y pattern_y 1 }\n"
-        " { 1 1 0 pattern_r pattern_r 1 }\n"
-        " { 1 1 0 pattern_t pattern_t 1 }\n"
-        " { 1 1 0 search_x search_x 1 }\n"
-        " { 1 1 0 search_y search_y 1 }\n"
-        " { 1 1 0 search_r search_r 1 }\n"
-        " { 1 1 0 search_t search_t 1 }\n"
-        " { 2 1 0 key_track key_track 1 }\n"
-        " { 2 1 0 key_search_x key_search_x 1 }\n"
-        " { 2 1 0 key_search_y key_search_y 1 }\n"
-        " { 2 1 0 key_search_r key_search_r 1 }\n"
-        " { 2 1 0 key_search_t key_search_t 1 }\n"
-        " { 2 1 0 key_track_x key_track_x 1 }\n"
-        " { 2 1 0 key_track_y key_track_y 1 }\n"
-        " { 2 1 0 key_track_r key_track_r 1 }\n"
-        " { 2 1 0 key_track_t key_track_t 1 }\n"
-        " { 2 1 0 key_centre_offset_x key_centre_offset_x 1 }\n"
-        " { 2 1 0 key_centre_offset_y key_centre_offset_y 1 }\n"
-        "}"
-    )
 
     tracker_strings = []
     num_tracks = len(active_tracks)
@@ -1506,13 +1690,32 @@ def generate_tracker_node(parent_node, json_path, width, height):
         tracker_strings.append(tracker_str)
 
     tracker_strings_combined = "{\n" + "\n".join(tracker_strings) + "\n}"
-    from_script_str = f"{{ 1 31 {num_tracks} }} \n{column_definitions} \n{tracker_strings_combined}\n"
+    from_script_str = f"{{ 1 31 {num_tracks} }} \n{TRACKER4_COLUMN_DEFINITIONS} \n{tracker_strings_combined}\n"
 
     try:
         tracker['tracks'].fromScript(from_script_str)
     except Exception as e:
         nuke.message(f"Failed to populate Tracker4 node tracks using fromScript:\n{str(e)}")
         return False
+
+    # N2: fromScript can silently produce empty/corrupt tracks without raising.
+    # Validate that the actual track count matches what we built. In real Nuke
+    # the tracks knob value is a sized list; we only validate when the accessor
+    # returns an actual sequence so an unexpected value type does not produce a
+    # false negative.
+    try:
+        actual_tracks = tracker['tracks'].value()
+    except Exception:
+        actual_tracks = None
+    if isinstance(actual_tracks, (list, tuple)):
+        actual_count = len(actual_tracks)
+        if actual_count != num_tracks:
+            nuke.message(
+                f"Tracker4 track population failed validation: expected {num_tracks} "
+                f"tracks but {actual_count} were created. fromScript may have produced "
+                f"empty or corrupt tracks. Please retry the export."
+            )
+            return False
 
     parent_node.setSelected(True)
     tracker.setSelected(True)
@@ -1552,15 +1755,9 @@ def _calculate_closed_bezier_tangent(points, idx, tension=0.25):
 
 def generate_roto_node(parent_node, json_path, width, height):
     """Loads JSON contour tracking results and generates a native, animated closed Roto node."""
-    if not os.path.exists(json_path):
-        nuke.message(f"Output JSON file not found:\n{json_path}")
-        return False
-
-    try:
-        with open(json_path, "r") as f:
-            roto_data = json.load(f)
-    except Exception as e:
-        nuke.message(f"Failed to parse JSON file:\n{str(e)}")
+    roto_data, err = _load_tracker_json(json_path)
+    if err is not None:
+        nuke.message(err)
         return False
 
     # Resolve selected contours based on CURRENT options in the properties panel
@@ -1616,14 +1813,18 @@ def generate_roto_node(parent_node, json_path, width, height):
         except Exception:
             pass
 
+        # N4: Resolve the parent group BEFORE deselecting, then deselect inside
+        # that group so nodes nested within the FaceTracker's parent are
+        # deselected too.
+        parent_group = parent_node.parent()
+
         # Deselect all nodes to cleanly connect the new Roto node to our custom node
-        for n in nuke.allNodes():
+        for n in nuke.allNodes(parent_group):
             n.setSelected(False)
 
         parent_node.setSelected(True)
 
         # Create the Roto Node in the parent canvas context
-        parent_group = parent_node.parent()
         with parent_group:
             roto_node = nuke.createNode('Roto')
         roto_node.setName(f"Roto_Face_{parent_node.name()}")
@@ -1647,12 +1848,34 @@ def generate_roto_node(parent_node, json_path, width, height):
 
             is_closed = group_name not in getattr(landmarks_config, "OPEN_CONTOUR_GROUPS", set())
 
-            # Set shape closure using the low-level _curvelib API
+            # N1: Set the contour open/closed state. Try the private _curvelib
+            # attribute set FIRST (the author deliberately uses _curvelib for Nuke 15+
+            # compatibility, where the public FlagType.eOpenFlag path is present but
+            # inconsistent across builds), and only fall back to the public
+            # shape.setFlag(eOpenFlag) when _curvelib is unavailable. This preserves
+            # the proven Nuke-15 behavior exactly and only diverges on versions where
+            # _curvelib fails. If BOTH paths fail, warn loudly instead of silently
+            # passing (the old code swallowed the failure and left the shape closed).
+            shape_closure_set = False
             try:
                 import _curvelib
                 shape.getAttributes().set(0, _curvelib.AnimAttributes.kClosedAttribute, 1.0 if is_closed else 0.0)
-            except Exception as e:
-                print(f"[NukeFaceTracker] Failed to set shape closed attribute via _curvelib: {e}")
+                shape_closure_set = True
+            except Exception:
+                # _curvelib unavailable on this Nuke version — try the public flag API.
+                pass
+
+            if not shape_closure_set:
+                try:
+                    # eOpenFlag True means the shape is open; pass (not is_closed).
+                    shape.setFlag(nuke.rotopaint.FlagType.eOpenFlag, not is_closed)
+                    shape_closure_set = True
+                except Exception as e:
+                    print(
+                        f"[NukeFaceTracker] WARNING: Could not set open/closed state "
+                        f"for contour '{group_name}' (is_closed={is_closed}): {e}. "
+                        f"Both the _curvelib and public setFlag(eOpenFlag) paths failed."
+                    )
 
             # 2. Add control points initialized at first frame coordinates
             for coords in first_points:
@@ -1723,70 +1946,42 @@ def generate_roto_node(parent_node, json_path, width, height):
     return True
 
 
-def generate_tracker_node_from_panel(node):
-    """Callback triggered from the Tracker tab. Loads JSON and builds the Tracker4 node."""
-    json_path = get_unique_output_json_path(node)
-    if not json_path:
-        nuke.message("Please specify a valid output JSON file path first.")
-        return False
-
+def _resolve_input_dimensions(node):
+    """Resolve the (width, height) of the node's active input, falling back to the
+    root format when there is no input or the input format cannot be evaluated."""
     input_node = node.input(0)
     if input_node:
         try:
-            width = input_node.format().width()
-            height = input_node.format().height()
+            return input_node.format().width(), input_node.format().height()
         except Exception:
-            width = nuke.root().format().width()
-            height = nuke.root().format().height()
-    else:
-        width = nuke.root().format().width()
-        height = nuke.root().format().height()
+            pass
+    return nuke.root().format().width(), nuke.root().format().height()
 
-    return generate_tracker_node(node, json_path, width, height)
+
+def _export_from_panel(node, builder):
+    """Shared export-from-panel flow: resolve the output JSON path, validate it,
+    resolve input dimensions, then delegate to ``builder(node, json_path, w, h)``."""
+    json_path = _resolve_output_json_path(node)
+    if not json_path:
+        nuke.message("Please specify a valid output JSON file path first.")
+        return False
+    width, height = _resolve_input_dimensions(node)
+    return builder(node, json_path, width, height)
+
+
+def generate_tracker_node_from_panel(node):
+    """Callback triggered from the Tracker tab. Loads JSON and builds the Tracker4 node."""
+    return _export_from_panel(node, generate_tracker_node)
 
 
 def generate_roto_node_from_panel(node):
     """Callback triggered from the Roto tab. Loads JSON and builds the Roto node."""
-    json_path = get_unique_output_json_path(node)
-    if not json_path:
-        nuke.message("Please specify a valid output JSON file path first.")
-        return False
-
-    input_node = node.input(0)
-    if input_node:
-        try:
-            width = input_node.format().width()
-            height = input_node.format().height()
-        except Exception:
-            width = nuke.root().format().width()
-            height = nuke.root().format().height()
-    else:
-        width = nuke.root().format().width()
-        height = nuke.root().format().height()
-
-    return generate_roto_node(node, json_path, width, height)
+    return _export_from_panel(node, generate_roto_node)
 
 
 def generate_cornerpin_node_from_panel(node):
     """Callback triggered from the CornerPin tab. Loads JSON, calculates corner pin data and builds the CornerPin2D node."""
-    json_path = get_unique_output_json_path(node)
-    if not json_path:
-        nuke.message("Please specify a valid output JSON file path first.")
-        return False
-
-    input_node = node.input(0)
-    if input_node:
-        try:
-            width = input_node.format().width()
-            height = input_node.format().height()
-        except Exception:
-            width = nuke.root().format().width()
-            height = nuke.root().format().height()
-    else:
-        width = nuke.root().format().width()
-        height = nuke.root().format().height()
-
-    return generate_cornerpin_node(node, json_path, width, height)
+    return _export_from_panel(node, generate_cornerpin_node)
 
 
 def set_ref_frame_to_current(node):
