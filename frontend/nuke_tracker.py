@@ -19,9 +19,9 @@ except ImportError:
     landmarks_config = None
 
 try:
-    import tracker_backend
+    import tracker_utils
 except ImportError:
-    tracker_backend = None
+    tracker_utils = None
 
 
 def find_upstream_read(node):
@@ -140,7 +140,7 @@ def find_vector_channels(node):
     best_score = -1
     best_pair = (None, None)
 
-    for layer in layers:
+    for layer in sorted(layers):
         for suffix_u, suffix_v in suffix_pairs:
             ch_u = f"{layer}{suffix_u}"
             ch_v = f"{layer}{suffix_v}"
@@ -363,6 +363,12 @@ def _configure_mapping_for_node(node, show_errors=True):
 
     mapping_path = _mapping_path_from_node(node)
     if not mapping_path:
+        try:
+            landmarks_config.load_mapping(None)
+        except Exception as e:
+            if show_errors:
+                nuke.message("Failed to restore default landmark mapping:\n{}".format(str(e)))
+            return False
         return True
     try:
         landmarks_config.load_mapping(mapping_path)
@@ -1056,15 +1062,15 @@ def _merge_backtrack_passes(output_fwd, output_bwd, output_json, task):
         nuke.message(f"Failed to read backward tracking JSON for merging:\n{str(e)}")
         return False
 
-    if not tracker_backend or not landmarks_config:
-        nuke.message("Failed to reference backend modules (tracker_backend or landmarks_config) for merging.")
+    if not tracker_utils or not landmarks_config:
+        nuke.message("Failed to reference backend modules (tracker_utils or landmarks_config) for merging.")
         return False
 
     try:
         contours_to_track = dict(landmarks_config.CONTOUR_GROUPS)
         landmarks_to_track = landmarks_config.get_landmarks_for_analysis()
 
-        merged_data = tracker_backend.merge_results(
+        merged_data = tracker_utils.merge_results(
             fwd_data,
             bwd_data,
             contours_to_track,
@@ -2361,11 +2367,13 @@ def generate_tracker_node(parent_node, json_path, width, height):
     # returns an actual sequence so an unexpected value type does not produce a
     # false negative.
     try:
-        actual_tracks = tracker['tracks'].value()
+        tracks_script = tracker['tracks'].toScript()
     except Exception:
-        actual_tracks = None
-    if isinstance(actual_tracks, (list, tuple)):
-        actual_count = len(actual_tracks)
+        tracks_script = ""
+
+    if isinstance(tracks_script, str) and tracks_script:
+        m = re.search(r"\{\s*1\s+31\s+(\d+)\s*\}", tracks_script)
+        actual_count = int(m.group(1)) if m else 0
         if actual_count != num_tracks:
             nuke.message(
                 f"Tracker4 track population failed validation: expected {num_tracks} "
@@ -2395,8 +2403,8 @@ def _get_keyable_anim_point(shape_point, attr_names):
 
 
 def _add_position_key(anim_point, frame, x_value, y_value):
-    x_curve = anim_point.getPositionAnimCurve(0, "")
-    y_curve = anim_point.getPositionAnimCurve(1, "")
+    x_curve = anim_point.getPositionAnimCurve(0)
+    y_curve = anim_point.getPositionAnimCurve(1)
     x_curve.addKey(frame, x_value)
     y_curve.addKey(frame, y_value)
 
@@ -2696,35 +2704,6 @@ def generate_roto_node(parent_node, json_path, width, height):
 
             is_closed = group_name not in getattr(landmarks_config, "OPEN_CONTOUR_GROUPS", set())
             _set_roto_shape_closed_state(shape, is_closed, first_frame, group_name)
-
-            # N1: Set the contour open/closed state. Try the private _curvelib
-            # attribute set FIRST (the author deliberately uses _curvelib for Nuke 15+
-            # compatibility, where the public FlagType.eOpenFlag path is present but
-            # inconsistent across builds), and only fall back to the public
-            # shape.setFlag(eOpenFlag) when _curvelib is unavailable. This preserves
-            # the proven Nuke-15 behavior exactly and only diverges on versions where
-            # _curvelib fails. If BOTH paths fail, warn loudly instead of silently
-            # passing (the old code swallowed the failure and left the shape closed).
-            shape_closure_set = False
-            try:
-                import _curvelib
-                shape.getAttributes().set(0, _curvelib.AnimAttributes.kClosedAttribute, 1.0 if is_closed else 0.0)
-                shape_closure_set = True
-            except Exception:
-                # _curvelib unavailable on this Nuke version — try the public flag API.
-                pass
-
-            if not shape_closure_set:
-                try:
-                    # eOpenFlag True means the shape is open; pass (not is_closed).
-                    shape.setFlag(nuke.rotopaint.FlagType.eOpenFlag, not is_closed)
-                    shape_closure_set = True
-                except Exception as e:
-                    print(
-                        f"[NukeFaceTracker] WARNING: Could not set open/closed state "
-                        f"for contour '{group_name}' (is_closed={is_closed}): {e}. "
-                        f"Both the _curvelib and public setFlag(eOpenFlag) paths failed."
-                    )
 
             # 2. Add control points initialized at first frame coordinates
             for coords in first_points:

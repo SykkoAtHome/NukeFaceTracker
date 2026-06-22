@@ -307,7 +307,7 @@ class TestTrackerRefinement(unittest.TestCase):
         def __init__(self):
             self.curves = [TestTrackerRefinement._FakeAnimCurve(), TestTrackerRefinement._FakeAnimCurve()]
 
-        def getPositionAnimCurve(self, dimension, _view):
+        def getPositionAnimCurve(self, dimension, _view=None):
             return self.curves[dimension]
 
     class _FakeControlPoint:
@@ -534,6 +534,56 @@ class TestTrackerRefinement(unittest.TestCase):
             self.assertIn('"full_face_oval_0"', from_script)
             self.assertNotIn('"sparse_nose_tip"', from_script)
             self.assertNotIn('"dense_eyes_left_eye_0"', from_script)
+
+    def test_generate_tracker_node_fails_on_mismatched_track_count(self):
+        """Test that generate_tracker_node fails validation when track count from toScript() mismatches requested tracks."""
+        import json
+
+        mock_parent = MagicMock()
+        mock_parent.name.return_value = "FaceTracker1"
+        mock_parent.parent.return_value = MagicMock()
+
+        knobs = {
+            'landmark_density': MagicMock(value=lambda: "Sparse"),
+            'track_nose': MagicMock(value=lambda: True),
+            'track_eyes': MagicMock(value=lambda: False),
+            'track_eyebrows': MagicMock(value=lambda: False),
+            'track_mouth': MagicMock(value=lambda: False),
+            'track_contour': MagicMock(value=lambda: False),
+            'export_t': MagicMock(value=lambda: True),
+            'export_r': MagicMock(value=lambda: False),
+            'export_s': MagicMock(value=lambda: False),
+            'export_cornerpin_tracker': MagicMock(value=lambda: False),
+        }
+        mock_parent.__getitem__.side_effect = lambda key: knobs[key]
+
+        dummy_data = {
+            "sparse_nose_tip": {"1": [10.0, 20.0]},
+        }
+
+        mock_nuke.allNodes.return_value = []
+        mock_tracker = MagicMock()
+        mock_tracks_knob = MagicMock()
+        mock_tracker.__getitem__.return_value = mock_tracks_knob
+        mock_nuke.createNode.return_value = mock_tracker
+
+        with patch("os.path.exists", return_value=True), \
+             patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(dummy_data))):
+            
+            # Scenario 1: toScript() returns track count that mismatches (expected: 1, got: 10)
+            mock_tracks_knob.toScript.return_value = "{ 1 31 10 }"
+            success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
+            self.assertFalse(success)
+            self.assertTrue(mock_nuke.message.called)
+
+            # Reset mock
+            mock_nuke.message.reset_mock()
+
+            # Scenario 2: toScript() returns track count that matches (expected: 1, got: 1)
+            mock_tracks_knob.toScript.return_value = "{ 1 31 1 }"
+            success = nuke_tracker.generate_tracker_node(mock_parent, "dummy.json", 1920, 1080)
+            self.assertTrue(success)
+            self.assertFalse(mock_nuke.message.called)
 
     def test_generate_tracker_node_preserves_missing_detection_frames(self):
         """Tracker export should not synthesize keyframes for frames missing in backend JSON."""
@@ -1690,7 +1740,7 @@ class TestRunTrackingOnNode(unittest.TestCase):
              patch("nuke_tracker._locate_venv_python", return_value="/fake/python"), \
              patch("nuke_tracker.find_vector_channels", return_value=("u", "v")), \
              patch("nuke_tracker.apply_smartvector_refinement", return_value=True) as refine_mock, \
-             patch("builtins.open", mock_open(read_data=tracker_json)):
+             patch("nuke_tracker.open", mock_open(read_data=tracker_json), create=True):
             result = nuke_tracker.run_tracking_on_node(node)
         self.assertTrue(result)
         self.assertTrue(refine_mock.called)
