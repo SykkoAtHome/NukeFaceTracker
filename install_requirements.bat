@@ -46,7 +46,7 @@ if !errorlevel! neq 0 (
 :: Download model file
 echo [INFO] Checking MediaPipe Face Landmarker model file...
 if not exist backend mkdir backend
-python -c "import os; import requests; url='https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'; dest='backend/face_landmarker.task'; print('Downloading model...' if not os.path.exists(dest) else 'Model already exists.'); os.makedirs('backend', exist_ok=True); open(dest, 'wb').write(requests.get(url).content) if not os.path.exists(dest) else None"
+python backend/model_downloader.py
 
 echo.
 echo [SUCCESS] Environment setup completed successfully!

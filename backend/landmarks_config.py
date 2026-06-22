@@ -1,5 +1,12 @@
+import json
+import os
+import re
+
 # Mapping of landmark indices from Google MediaPipe Face Mesh (0-477)
 # to descriptive names for VFX artists in Foundry Nuke.
+
+PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_MAPPING_PATH = os.path.join(PLUGIN_DIR, "default_mapping.json")
 
 # --- SPARSE LANDMARK GROUPS ---
 LANDMARK_GROUPS = {
@@ -204,23 +211,285 @@ SURFACE_PART_PREFIXES = {
 TRACKER_DENSITY_LABELS = [
     "Sparse (Standard)",
     "Dense (Feature Contours)",
-    "Surface (Face Regions)",
     "Full (Entire Mesh & Iris - 478 pts)",
 ]
+
+PROFILE_ORDER = ("sparse", "dense", "full")
+TRACKER_PART_ORDER = ("nose", "eyes", "eyebrows", "mouth", "face")
+PART_LABELS = {
+    "nose": "Nose",
+    "eyes": "Eyes",
+    "eyebrows": "Eyebrows",
+    "mouth": "Mouth",
+    "face": "Face",
+}
+PART_KNOB_NAMES = {
+    "nose": "track_nose",
+    "eyes": "track_eyes",
+    "eyebrows": "track_eyebrows",
+    "mouth": "track_mouth",
+    "face": "track_contour",
+}
+PART_DEFAULTS = {
+    "nose": True,
+    "eyes": True,
+    "eyebrows": False,
+    "mouth": True,
+    "face": True,
+}
+TOKEN_ALIASES = {
+    "right_eyebrwo": "right_eyebrow",
+    "let_alae": "left_ala",
+    "left_alae": "left_ala",
+    "right_alae": "right_ala",
+    "symetry_axis": "symmetry_axis",
+}
+
+PROFILE_MAPPINGS = {}
+PROFILE_LANDMARKS = {}
+GRID_MAPPING = {}
+GRID_LANDMARKS = {}
+ACTIVE_MAPPING_PATH = DEFAULT_MAPPING_PATH
+
+
+def _sanitize_token(value):
+    token = re.sub(r"[^0-9A-Za-z]+", "_", str(value).strip().lower()).strip("_")
+    token = TOKEN_ALIASES.get(token, token)
+    return token or "unnamed"
+
+
+def _display_label(value):
+    return _sanitize_token(value).replace("_", " ").title()
+
+
+def _normalize_part(value):
+    token = _sanitize_token(value)
+    if token == "face_shape":
+        return "face"
+    return token
+
+
+def _density_key(density):
+    value = str(density).lower()
+    if "full" in value:
+        return "full"
+    if "dense" in value or "contour" in value:
+        return "dense"
+    if "surface" in value:
+        # Surface was an older plugin-only density. The tool mapping now owns
+        # sparse/dense/full, so keep Surface imports/export calls compatible by
+        # resolving them to the closest authored profile.
+        return "dense"
+    return "sparse"
+
+
+def _coerce_ids(value):
+    if isinstance(value, dict):
+        value = value.get("ids", [])
+    if not isinstance(value, (list, tuple)):
+        return []
+
+    ids = []
+    for item in value:
+        try:
+            idx = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < 478:
+            ids.append(idx)
+    return ids
+
+
+def _track_name(profile_name, parent_name, child_name, position=None, count=1):
+    base = "{}_{}_{}".format(
+        _sanitize_token(profile_name),
+        _sanitize_token(parent_name),
+        _sanitize_token(child_name),
+    )
+    if count == 1 or position is None:
+        return base
+    return "{}_{}".format(base, int(position))
+
+
+def grid_track_name(row, col):
+    return "grid_r{:02d}_c{:02d}".format(int(row) + 1, int(col) + 1)
+
+
+def _roto_contour_name(parent_name, child_name):
+    return _track_name("roto", parent_name, child_name)
+
+
+def _iter_profile_children(profile_name):
+    profile = PROFILE_MAPPINGS.get(profile_name, {})
+    if not isinstance(profile, dict):
+        return
+
+    for parent_name, children in profile.items():
+        if not isinstance(children, dict):
+            continue
+        parent_key = _normalize_part(parent_name)
+        for child_name, value in children.items():
+            child_key = _sanitize_token(child_name)
+            child_parent_key = parent_key
+            if "eyebrow" in child_key:
+                child_parent_key = "eyebrows"
+            yield child_parent_key, parent_name, child_name, value
+
+
+def _build_regular_landmarks(profile_name):
+    by_part = {}
+    for parent_key, parent_name, child_name, value in _iter_profile_children(profile_name):
+        ids = _coerce_ids(value)
+        if not ids:
+            continue
+        part_landmarks = by_part.setdefault(parent_key, {})
+        for position, idx in enumerate(ids):
+            name = _track_name(profile_name, parent_name, child_name, position, len(ids))
+            part_landmarks[name] = idx
+    return by_part
+
+
+def _build_roto_contours():
+    contours = {}
+    open_groups = set()
+    knob_specs = []
+
+    for parent_key, parent_name, child_name, value in _iter_profile_children("roto"):
+        ids = _coerce_ids(value)
+        if not ids:
+            continue
+
+        contour_name = _roto_contour_name(parent_name, child_name)
+        contours[contour_name] = ids
+        if isinstance(value, dict) and value.get("openSpline"):
+            open_groups.add(contour_name)
+
+        knob_name = "roto_{}_{}".format(_sanitize_token(parent_name), _sanitize_token(child_name))
+        label = "{} / {} ({} pts)".format(_display_label(parent_name), _display_label(child_name), len(ids))
+        default_value = parent_key in ("face", "mouth", "eyes")
+        knob_specs.append((knob_name, contour_name, label, default_value))
+
+    return contours, tuple(open_groups), tuple(knob_specs)
+
+
+def _build_grid_landmarks(grid_mapping):
+    landmarks = {}
+    if not isinstance(grid_mapping, dict):
+        return landmarks
+
+    for point in grid_mapping.get("points", []):
+        if not isinstance(point, dict):
+            continue
+        if point.get("id") is None:
+            continue
+        try:
+            row = int(point.get("row"))
+            col = int(point.get("col"))
+            idx = int(point.get("id"))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < 478:
+            landmarks[grid_track_name(row, col)] = idx
+    return landmarks
+
+
+def _load_mapping_json(path):
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    if not isinstance(data, dict):
+        raise ValueError("Mapping JSON must contain an object.")
+
+    profiles = data.get("profiles", data)
+    if not isinstance(profiles, dict):
+        raise ValueError("Mapping JSON must contain a 'profiles' object.")
+
+    return profiles
+
+
+def load_mapping(path=None):
+    """Load mapping profiles from JSON and update the module-level API.
+
+    The frontend can call this before analysis/export with a node-specific path.
+    The backend calls it from CLI args. Existing callers keep using constants and
+    resolver functions without needing to know where the mapping came from.
+    """
+    global ACTIVE_MAPPING_PATH, PROFILE_MAPPINGS, PROFILE_LANDMARKS
+    global LANDMARK_GROUPS, SPARSE_PART_TO_LANDMARKS, DENSE_PART_TO_CONTOURS
+    global CONTOUR_GROUPS, ROTO_CONTOUR_GROUP_NAMES, ROTO_CONTOUR_KNOB_SPECS
+    global OPEN_CONTOUR_GROUPS, ALL_LANDMARKS, INDEX_TO_NAME
+    global GRID_MAPPING, GRID_LANDMARKS, TRACKER_DENSITY_LABELS
+
+    resolved_path = path or DEFAULT_MAPPING_PATH
+    resolved_path = os.path.abspath(os.path.expanduser(resolved_path))
+    profiles = _load_mapping_json(resolved_path)
+
+    PROFILE_MAPPINGS = {
+        "sparse": profiles.get("sparse", {}),
+        "dense": profiles.get("dense", {}),
+        "full": profiles.get("full", {}),
+        "roto": profiles.get("roto", {}),
+        "grid": profiles.get("grid", {}),
+    }
+    PROFILE_LANDMARKS = {
+        profile_name: _build_regular_landmarks(profile_name)
+        for profile_name in PROFILE_ORDER
+    }
+
+    LANDMARK_GROUPS = PROFILE_LANDMARKS.get("sparse", {})
+    SPARSE_PART_TO_LANDMARKS = LANDMARK_GROUPS
+    CONTOUR_GROUPS, OPEN_CONTOUR_GROUPS, ROTO_CONTOUR_KNOB_SPECS = _build_roto_contours()
+    ROTO_CONTOUR_GROUP_NAMES = tuple(CONTOUR_GROUPS.keys())
+    DENSE_PART_TO_CONTOURS = {}
+
+    GRID_MAPPING = PROFILE_MAPPINGS.get("grid", {})
+    GRID_LANDMARKS = _build_grid_landmarks(GRID_MAPPING)
+
+    ALL_LANDMARKS = {}
+    for profile_landmarks in PROFILE_LANDMARKS.values():
+        for landmarks in profile_landmarks.values():
+            ALL_LANDMARKS.update(landmarks)
+    ALL_LANDMARKS.update(GRID_LANDMARKS)
+    INDEX_TO_NAME = {idx: name for name, idx in ALL_LANDMARKS.items()}
+
+    TRACKER_DENSITY_LABELS = ["Sparse", "Dense", "Full"]
+    ACTIVE_MAPPING_PATH = resolved_path
+    return PROFILE_MAPPINGS
+
+
+def get_active_mapping_path():
+    return ACTIVE_MAPPING_PATH
+
+
+def get_tracker_part_specs():
+    available = set()
+    for profile_name in PROFILE_ORDER:
+        available.update(PROFILE_LANDMARKS.get(profile_name, {}).keys())
+
+    ordered = [part for part in TRACKER_PART_ORDER if part in available]
+    ordered.extend(sorted(part for part in available if part not in ordered))
+
+    return [
+        (
+            PART_KNOB_NAMES.get(part, "track_{}".format(part)),
+            part,
+            PART_LABELS.get(part, _display_label(part)),
+            PART_DEFAULTS.get(part, True),
+        )
+        for part in ordered
+    ]
+
+
+def get_grid_mapping():
+    return GRID_MAPPING
+
+
+def get_grid_landmarks():
+    return dict(GRID_LANDMARKS)
 
 
 def get_roto_contour_names():
     return list(ROTO_CONTOUR_GROUP_NAMES)
-
-
-def _density_key(density):
-    if "Full" in density:
-        return "full"
-    if "Surface" in density:
-        return "surface"
-    if "Dense" in density or "Contour" in density:
-        return "dense"
-    return "sparse"
 
 
 def _add_indexed_landmarks(resolved, prefix, indices):
@@ -245,58 +514,61 @@ def get_landmarks_for_density(density, active_parts):
     and list of active parts selected by the user.
     """
     resolved = {}
-    active_set = set(active_parts)
     density_key = _density_key(density)
+    profile_landmarks = PROFILE_LANDMARKS.get(density_key, {})
+    active_set = {_normalize_part(part) for part in active_parts}
 
-    if density_key == "sparse":
-        for part, landmarks in SPARSE_PART_TO_LANDMARKS.items():
-            if part in active_set:
-                for name, idx in landmarks.items():
-                    resolved[name] = idx
-
-    elif density_key == "dense":
-        if "Nose" in active_set:
-            for name, idx in SPARSE_PART_TO_LANDMARKS["Nose"].items():
-                resolved[name] = idx
-
-        for part, contour_names in DENSE_PART_TO_CONTOURS.items():
-            if part in active_set:
-                for contour_name in contour_names:
-                    pts = CONTOUR_GROUPS[contour_name]
-                    _add_indexed_landmarks(resolved, contour_name, pts)
-
-    elif density_key == "surface":
-        for part, indices in SURFACE_PART_TO_INDICES.items():
-            if part in active_set:
-                _add_indexed_landmarks(resolved, SURFACE_PART_PREFIXES[part], indices)
-
-    elif density_key == "full":
-        for part, indices in FULL_PART_TO_INDICES.items():
-            if part in active_set:
-                for idx in indices:
-                    resolved[f"Mesh_{idx}"] = idx
+    for part, landmarks in profile_landmarks.items():
+        if part in active_set:
+            resolved.update(landmarks)
 
     return resolved
 
 
 def get_all_part_names():
-    return list(SPARSE_PART_TO_LANDMARKS.keys())
+    return [part for _knob_name, part, _label, _default in get_tracker_part_specs()]
 
 
-def get_landmarks_for_analysis(density=None, active_parts=None):
+def get_landmarks_for_analysis():
     """
-    Returns the tracker data that should be recorded during analysis.
+    Returns the full export superset of tracker landmarks recorded during analysis.
 
-    Backend tracking records the full export superset. Tracker and Roto exports
-    filter this data later according to the user's current frontend choices.
+    No filtering is applied: every density and every part is merged into a single
+    resolved dictionary. Tracker and Roto exports filter this superset later
+    according to the user's current frontend choices.
     """
     resolved = {}
     parts = get_all_part_names()
 
-    for analysis_density in ("Sparse", "Dense", "Surface", "Full"):
+    for analysis_density in ("Sparse", "Dense", "Full"):
         _merge_landmarks(resolved, get_landmarks_for_density(analysis_density, parts))
+    _merge_landmarks(resolved, GRID_LANDMARKS)
 
     return resolved
+
+
+def resolve_contour_point(name):
+    """
+    Resolve a contour point track name to its contour group and in-group position.
+
+    Contour point names follow the ``GroupName_N`` convention (e.g. ``Face_Oval_3``),
+    where ``N`` is the 0-based position within that group's point list in
+    ``CONTOUR_GROUPS`` (NOT the MediaPipe landmark index).
+
+    Returns ``(group_name, N)`` when ``name`` matches a contour group prefix and
+    ``N`` is in range for that group, otherwise ``None``.
+    """
+    for group_name, indices in CONTOUR_GROUPS.items():
+        prefix = group_name + "_"
+        if name.startswith(prefix):
+            try:
+                idx_in_group = int(name[len(prefix):])
+            except ValueError:
+                return None
+            if 0 <= idx_in_group < len(indices):
+                return (group_name, idx_in_group)
+            return None
+    return None
 
 
 # Flat dictionary of all individual landmarks for quick lookup
@@ -317,8 +589,6 @@ def get_landmarks_by_names(names):
     for name in names:
         if name in ALL_LANDMARKS:
             result[name] = ALL_LANDMARKS[name]
-        elif name in SURFACE_LANDMARKS:
-            result[name] = SURFACE_LANDMARKS[name]
         elif name.startswith("Mesh_"):
             try:
                 idx = int(name.split("_")[1])
@@ -343,3 +613,6 @@ def get_contour_groups_by_names(names):
     if not names:
         return CONTOUR_GROUPS
     return {name: CONTOUR_GROUPS[name] for name in names if name in CONTOUR_GROUPS}
+
+
+load_mapping(DEFAULT_MAPPING_PATH)

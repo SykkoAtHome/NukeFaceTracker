@@ -24,12 +24,17 @@ library conflicts that can crash the host application.
 - **Tracking quality controls** - Choose video or frame-by-frame tracking,
   confidence presets, optional backward pass averaging, and optional
   SmartVector refinement.
+- **Mapping-driven exports** - Tracker, Roto, and GridWarp exports use the
+  bundled `default_mapping.json`, or a custom profile JSON exported from the
+  landmark grouping tool.
 - **Tracker export** - Generates a native `Tracker4` node from sparse, dense,
-  surface, or full 478-point landmark sets.
+  or full landmark profile sets.
 - **Roto export** - Generates animated Roto splines for selected facial
   contours, with optional cusped or smooth Bezier shapes.
 - **CornerPin export** - Builds a `CornerPin2D` node from the tracked facial
   bounding region and a chosen reference frame.
+- **GridWarp export** - Builds a reference-frame face grid from the mapping and
+  animates the source grid from tracked landmarks.
 - **Landmark grouping tool** - Includes a browser-based MediaPipe landmark
   grouper for designing and validating parent/child landmark mappings.
 
@@ -101,14 +106,21 @@ plugin and Python paths, and `menu.py` registers the node in the Nodes toolbar.
    - Enable **Refine with SmartVectors** when a SmartVector pass is connected to
      the second input.
    - Click **Track Face**.
-6. Export the result from one of the output tabs:
+6. Optional: in the **Settings** tab, point **Mapping JSON** at a custom profile
+   file exported from the landmark grouper.
+7. Export the result from one of the output tabs:
    - **Tracker** creates a `Tracker4` node.
    - **Roto** creates animated contour splines.
    - **CornerPin** creates a `CornerPin2D` node from the tracked face bounds.
+   - **GridWarp** creates a mapped face grid using a reference frame.
 
 Tracking data is written to Nuke's temp directory by default. Enable **Write
 Results to File** in the FaceTracker node if you want to keep the generated JSON
 at a specific path.
+
+If MediaPipe does not detect a face on a frame, the backend leaves that frame
+unkeyed. Exports preserve those gaps instead of synthesizing keyframes, allowing
+Nuke's native curve interpolation to solve between detected frames.
 
 ---
 
@@ -126,8 +138,7 @@ change these options after analysis without rerunning MediaPipe.
     corners, cheeks, chin, and forehead.
   - `Dense (Feature Contours)` - ordered feature contours for eyes, brows, lips,
     nose, iris, and face oval.
-  - `Surface (Face Regions)` - broader point clouds for facial regions.
-  - `Full (Entire Mesh & Iris - 478 pts)` - all selected MediaPipe mesh points.
+  - `Full` - the authored full profile from the active mapping JSON.
 - **Select Landmarks to Track** limits export by face part: Nose, Eyes,
   Eyebrows, Mouth, and Face Shape.
 - **Export Transform Flags** controls the `T`, `R`, and `S` flags on the
@@ -150,6 +161,12 @@ clouds are intentionally not exported as Roto shapes.
 The CornerPin tab creates an animated `CornerPin2D` node. The `to` corners are
 taken from the selected reference frame, while the `from` corners are animated
 from the tracked facial bounding region.
+
+### GridWarp
+
+The GridWarp tab uses the active mapping's `grid` profile. The selected
+reference frame defines the static destination grid, and the source grid payload
+is animated from tracked `grid_rXX_cYY` landmark tracks.
 
 ---
 
@@ -211,6 +228,7 @@ into the currently selected profile.
 - `install_requirements.bat` - Creates `.venv`, installs dependencies, and
   downloads the MediaPipe model.
 - `requirements.txt` - Backend Python dependencies.
+- `default_mapping.json` - Bundled landmark profiles used by the Nuke plugin.
 - `backend/`
   - `tracker_backend.py` - CLI tracking backend, frame loading, MediaPipe
     inference, coordinate conversion, and JSON output.
