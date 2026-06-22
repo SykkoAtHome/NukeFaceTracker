@@ -3,19 +3,29 @@ import sys
 import argparse
 import json
 import re
-try:
-    import cv2
-    import mediapipe as mp
-    from mediapipe.tasks import python
-    from mediapipe.tasks.python import vision
-except ImportError:
-    cv2 = None
-    mp = None
-    python = None
-    vision = None
 
 # Import landmarks configurations
 import landmarks_config
+
+
+def _load_mediapipe():
+    """Lazily import OpenCV and MediaPipe.
+
+    Kept out of the module top level so this module has no third-party imports at
+    import time. This keeps Nuke's interpreter clean if it ever imports this module
+    in-process (normally tracker_backend runs as an isolated subprocess). The
+    subprocess resolves packages from its own venv python + sys.path[0] (this
+    file's directory) and never relies on an inherited PYTHONPATH.
+    """
+    try:
+        import cv2
+        import mediapipe as mp
+        from mediapipe.tasks import python
+        from mediapipe.tasks.python import vision
+        return cv2, mp, python, vision
+    except ImportError as e:
+        print(f"[ERROR] Missing MediaPipe/OpenCV dependency: {e}")
+        sys.exit(1)
 
 def _to_nuke_xy(lm, width, height):
     """Convert a MediaPipe normalized landmark to Nuke pixel space [x, y].
@@ -54,6 +64,7 @@ def get_frame_path(pattern, frame_num):
     return cleaned_pattern
 
 def run_tracking_pass(frame_sequence, options, args, is_sequence, width, height, fps, contours_to_track, landmarks_to_track, run_mode, total_progress_frames, progress_offset):
+    cv2, mp, python, vision = _load_mediapipe()
     # Initialize detector for this pass
     try:
         detector = vision.FaceLandmarker.create_from_options(options)
@@ -209,6 +220,8 @@ def main():
         if (args.end - args.start + 1) > 1_000_000:
             print(f"[ERROR] Requested frame range ({args.start} to {args.end}) exceeds maximum allowed frames of 1,000,000.")
             sys.exit(1)
+
+        cv2, mp, python, vision = _load_mediapipe()
 
         if args.mapping:
             landmarks_config.load_mapping(args.mapping)

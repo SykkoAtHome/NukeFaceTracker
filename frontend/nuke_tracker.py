@@ -935,6 +935,12 @@ def _run_tracking_passes(passes_to_run, task, start_frame, end_frame):
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = 0  # SW_HIDE
 
+    # Strip Nuke's PYTHONPATH so the backend subprocess resolves packages only
+    # from its own venv python + sys.path[0] (the backend dir), never from Nuke's
+    # module paths. Keeps MediaPipe/OpenCV/NumPy out of Nuke's interpreter class.
+    child_env = dict(os.environ)
+    child_env.pop("PYTHONPATH", None)
+
     # Execute each pass sequentially
     for p_info in passes_to_run:
         task.setMessage(f"Initializing face detection engine ({p_info['name']} pass)...")
@@ -946,7 +952,8 @@ def _run_tracking_passes(passes_to_run, task, start_frame, end_frame):
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
                 startupinfo=startupinfo,
-                bufsize=1
+                bufsize=1,
+                env=child_env
             )
         except Exception as e:
             nuke.message(f"Failed to start backend subprocess for {p_info['name']} pass:\n{str(e)}")
@@ -1041,7 +1048,7 @@ def _run_tracking_passes(passes_to_run, task, start_frame, end_frame):
 
 
 def _merge_backtrack_passes(output_fwd, output_bwd, output_json, task):
-    """Merge forward/backward tracking JSON outputs via tracker_backend.merge_results.
+    """Merge forward/backward tracking JSON outputs via tracker_utils.merge_results.
 
     Returns True on success, False (after nuke.message) on any read/merge/write
     failure. The merged result is written to output_json.
