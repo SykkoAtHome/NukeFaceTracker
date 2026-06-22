@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import os
 import sys
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import requests
 
@@ -117,10 +117,15 @@ def download_model(dest_path=MODEL_PATH):
                 if not location:
                     print("\n[ERROR] Redirect response missing Location header.")
                     return False
-                if urlparse(location).hostname != model_host:
-                    print(f"\n[ERROR] Redirect target host '{urlparse(location).hostname}' does not match model host '{model_host}'.")
+                resolved_location = urljoin(url, location)
+                parsed_location = urlparse(resolved_location)
+                if parsed_location.hostname != model_host:
+                    print(f"\n[ERROR] Redirect target host '{parsed_location.hostname}' does not match model host '{model_host}'.")
                     return False
-                url = location
+                if parsed_location.scheme != "https":
+                    print(f"\n[ERROR] Redirect target scheme '{parsed_location.scheme}' is not secure (HTTPS required).")
+                    return False
+                url = resolved_location
                 continue
             # Non-redirect response: stream to the .part file. The context
             # manager ensures the connection closes on both success and failure.

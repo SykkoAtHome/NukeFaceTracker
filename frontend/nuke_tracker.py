@@ -2440,12 +2440,13 @@ def _set_roto_shape_closed_state(shape, is_closed, frame=None, contour_name=""):
     except Exception as e:
         errors.append(str(e))
 
-    try:
-        # eOpenFlag True means the shape is open.
-        shape.setFlag(nuke.rotopaint.FlagType.eOpenFlag, not is_closed)
-        state_set = True
-    except Exception as e:
-        errors.append(str(e))
+    if not state_set:
+        try:
+            # eOpenFlag True means the shape is open.
+            shape.setFlag(nuke.rotopaint.FlagType.eOpenFlag, not is_closed)
+            state_set = True
+        except Exception as e:
+            errors.append(str(e))
 
     if not state_set:
         print(

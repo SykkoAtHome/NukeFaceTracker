@@ -77,14 +77,12 @@ class TestModelDownloader(unittest.TestCase):
         with open(self.dest, "wb") as f:
             f.write(b"bad content")
         good = b"good content"
+        good_digest = hashlib.sha256(good).hexdigest()
         good_resp = _FakeResponse(status_code=200, content=good,
                                   headers={"content-length": str(len(good))})
-        with patch("model_downloader.EXPECTED_MODEL_SHA256", "a" * 64), \
-             patch("model_downloader._sha256_of_file", return_value="b" * 64):
+        with patch("model_downloader.EXPECTED_MODEL_SHA256", good_digest):
             with self._patch_get([good_resp]):
-                # After re-download, _verify_model_hash(part_path) must succeed.
-                with patch("model_downloader._verify_model_hash", side_effect=[False, True]):
-                    self.assertTrue(model_downloader.download_model(self.dest))
+                self.assertTrue(model_downloader.download_model(self.dest))
         # The bad pre-existing file should have been removed and replaced.
         with open(self.dest, "rb") as f:
             self.assertEqual(f.read(), good)
@@ -161,12 +159,60 @@ class TestModelDownloader(unittest.TestCase):
         content = b"some bytes"
         resp = _FakeResponse(status_code=200, content=content,
                               headers={"content-length": str(len(content))})
-        with patch("model_downloader.EXPECTED_MODEL_SHA256", "c" * 64), \
-             patch("model_downloader._verify_model_hash", return_value=False):
+        with patch("model_downloader.EXPECTED_MODEL_SHA256", "c" * 64):
             with self._patch_get([resp]):
                 self.assertFalse(model_downloader.download_model(self.dest))
         self.assertFalse(os.path.exists(self.dest))
         self.assertFalse(os.path.exists(self.dest + ".part"))
+
+    def test_mid_stream_exception_cleans_up_part_file(self):
+        class _FailingFakeResponse(_FakeResponse):
+            def iter_content(self, chunk_size=1024):
+                yield b"partial content"
+                raise OSError("Simulated mid-stream connection/disk error")
+
+        resp = _FailingFakeResponse(status_code=200, headers={"content-length": "1000"})
+        with patch("model_downloader.EXPECTED_MODEL_SHA256", "some_hash"):
+            with self._patch_get([resp]):
+                self.assertFalse(model_downloader.download_model(self.dest))
+        self.assertFalse(os.path.exists(self.dest))
+        self.assertFalse(os.path.exists(self.dest + ".part"))
+
+    def test_os_replace_failure_cleans_up_and_returns_false(self):
+        content = b"valid content"
+        digest = hashlib.sha256(content).hexdigest()
+        resp = _FakeResponse(status_code=200, content=content,
+                             headers={"content-length": str(len(content))})
+        with patch("model_downloader.EXPECTED_MODEL_SHA256", digest), \
+             patch("os.replace", side_effect=OSError("Permission denied")):
+            with self._patch_get([resp]):
+                self.assertFalse(model_downloader.download_model(self.dest))
+        self.assertFalse(os.path.exists(self.dest))
+        self.assertFalse(os.path.exists(self.dest + ".part"))
+
+    def test_existing_file_remove_failure_returns_false(self):
+        with open(self.dest, "wb") as f:
+            f.write(b"bad content")
+        with patch("model_downloader.EXPECTED_MODEL_SHA256", "some_good_hash"), \
+             patch("os.remove", side_effect=OSError("Locked file")):
+            self.assertFalse(model_downloader.download_model(self.dest))
+
+    def test_redirect_to_http_same_host_is_rejected(self):
+        redirect = _FakeResponse(status_code=302, location="http://storage.googleapis.com/model.task")
+        with self._patch_get([redirect]):
+            self.assertFalse(model_downloader.download_model(self.dest))
+        self.assertFalse(os.path.exists(self.dest))
+
+    def test_relative_redirect_is_followed_and_succeeds(self):
+        content = b"redirected content"
+        redirect = _FakeResponse(status_code=302, location="/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task?token=123")
+        final = _FakeResponse(status_code=200, content=content,
+                               headers={"content-length": str(len(content))})
+        with patch("model_downloader.EXPECTED_MODEL_SHA256", hashlib.sha256(content).hexdigest()):
+            with self._patch_get([redirect, final]):
+                self.assertTrue(model_downloader.download_model(self.dest))
+        with open(self.dest, "rb") as f:
+            self.assertEqual(f.read(), content)
 
 
 if __name__ == "__main__":
