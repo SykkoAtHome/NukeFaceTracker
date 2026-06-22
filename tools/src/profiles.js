@@ -212,7 +212,7 @@ const INITIAL_PROFILE_EXPORT = {
                         7
                     ],
                     "openSpline": false,
-                    "color": "#ff0000"
+                    "color": "#AA0DFE"
                 },
                 "left_iris": {
                     "ids": [
@@ -222,7 +222,7 @@ const INITIAL_PROFILE_EXPORT = {
                         477
                     ],
                     "openSpline": false,
-                    "color": "#00cc33"
+                    "color": "#3283FE"
                 },
                 "right_eye": {
                     "ids": [
@@ -238,7 +238,7 @@ const INITIAL_PROFILE_EXPORT = {
                         249
                     ],
                     "openSpline": false,
-                    "color": "#3333ff"
+                    "color": "#85660D"
                 },
                 "right_iris": {
                     "ids": [
@@ -248,7 +248,7 @@ const INITIAL_PROFILE_EXPORT = {
                         472
                     ],
                     "openSpline": false,
-                    "color": "#ffff00"
+                    "color": "#782AB6"
                 },
                 "left_eyebrow": {
                     "ids": [
@@ -266,7 +266,7 @@ const INITIAL_PROFILE_EXPORT = {
                         66
                     ],
                     "openSpline": false,
-                    "color": "#ff00ff"
+                    "color": "#565656"
                 },
                 "right_eyebrow": {
                     "ids": [
@@ -284,7 +284,7 @@ const INITIAL_PROFILE_EXPORT = {
                         285
                     ],
                     "openSpline": false,
-                    "color": "#00e6e6"
+                    "color": "#1C8356"
                 },
                 "left_socket": {
                     "ids": [
@@ -306,7 +306,7 @@ const INITIAL_PROFILE_EXPORT = {
                         111
                     ],
                     "openSpline": false,
-                    "color": "#ff8000"
+                    "color": "#16FF32"
                 },
                 "right_socket": {
                     "ids": [
@@ -328,7 +328,7 @@ const INITIAL_PROFILE_EXPORT = {
                         340
                     ],
                     "openSpline": false,
-                    "color": "#9900ff"
+                    "color": "#F7E1A0"
                 }
             },
             "mouth": {
@@ -362,7 +362,7 @@ const INITIAL_PROFILE_EXPORT = {
                         37
                     ],
                     "openSpline": false,
-                    "color": "#4ce600"
+                    "color": "#E2E2E2"
                 },
                 "lip_lower": {
                     "ids": [
@@ -394,7 +394,7 @@ const INITIAL_PROFILE_EXPORT = {
                         87
                     ],
                     "openSpline": false,
-                    "color": "#ff0080"
+                    "color": "#1CBE4F"
                 },
                 "mouth_outer": {
                     "ids": [
@@ -416,7 +416,7 @@ const INITIAL_PROFILE_EXPORT = {
                         43
                     ],
                     "openSpline": false,
-                    "color": "#00bfff"
+                    "color": "#C4451C"
                 },
                 "mouth_inner": {
                     "ids": [
@@ -442,7 +442,7 @@ const INITIAL_PROFILE_EXPORT = {
                         146
                     ],
                     "openSpline": false,
-                    "color": "#ffbf00"
+                    "color": "#DEA0FD"
                 }
             },
             "nose": {
@@ -475,7 +475,7 @@ const INITIAL_PROFILE_EXPORT = {
                         107
                     ],
                     "openSpline": false,
-                    "color": "#00e699"
+                    "color": "#FE00FA"
                 },
                 "right_nostril": {
                     "ids": [
@@ -487,7 +487,7 @@ const INITIAL_PROFILE_EXPORT = {
                         309
                     ],
                     "openSpline": false,
-                    "color": "#ff4000"
+                    "color": "#325A9B"
                 },
                 "left_nostril": {
                     "ids": [
@@ -499,7 +499,7 @@ const INITIAL_PROFILE_EXPORT = {
                         166
                     ],
                     "openSpline": false,
-                    "color": "#8080ff"
+                    "color": "#FEAF16"
                 },
                 "bridge": {
                     "ids": [
@@ -519,7 +519,7 @@ const INITIAL_PROFILE_EXPORT = {
                         107
                     ],
                     "openSpline": false,
-                    "color": "#99e600"
+                    "color": "#F8A19F"
                 }
             },
             "face": {
@@ -552,7 +552,7 @@ const INITIAL_PROFILE_EXPORT = {
                         212
                     ],
                     "openSpline": false,
-                    "color": "#ff66cc"
+                    "color": "#90AD1C"
                 },
                 "forehead": {
                     "ids": [
@@ -582,7 +582,7 @@ const INITIAL_PROFILE_EXPORT = {
                         67
                     ],
                     "openSpline": false,
-                    "color": "#3385ff"
+                    "color": "#F6222E"
                 },
                 "left_cheek": {
                     "ids": [
@@ -608,7 +608,7 @@ const INITIAL_PROFILE_EXPORT = {
                         119
                     ],
                     "openSpline": false,
-                    "color": "#2e992e"
+                    "color": "#1CFFCE"
                 },
                 "left_jaw": {
                     "ids": [
@@ -628,7 +628,7 @@ const INITIAL_PROFILE_EXPORT = {
                         93
                     ],
                     "openSpline": false,
-                    "color": "#e60039"
+                    "color": "#2ED9FF"
                 },
                 "right_cheek": {
                     "ids": [
@@ -654,7 +654,7 @@ const INITIAL_PROFILE_EXPORT = {
                         329
                     ],
                     "openSpline": false,
-                    "color": "#ad26d9"
+                    "color": "#B10DA1"
                 },
                 "right_jaw": {
                     "ids": [
@@ -674,7 +674,7 @@ const INITIAL_PROFILE_EXPORT = {
                         323
                     ],
                     "openSpline": false,
-                    "color": "#00b359"
+                    "color": "#C075A6"
                 },
                 "left_temple": {
                     "ids": [
@@ -690,7 +690,7 @@ const INITIAL_PROFILE_EXPORT = {
                         127
                     ],
                     "openSpline": false,
-                    "color": "#005c99"
+                    "color": "#FC1CBF"
                 },
                 "right_temple": {
                     "ids": [
@@ -706,7 +706,7 @@ const INITIAL_PROFILE_EXPORT = {
                         368
                     ],
                     "openSpline": false,
-                    "color": "#b35900"
+                    "color": "#B00068"
                 },
                 "symetry_axis": {
                     "ids": [
@@ -740,7 +740,7 @@ const INITIAL_PROFILE_EXPORT = {
                         152
                     ],
                     "openSpline": true,
-                    "color": "#009966"
+                    "color": "#FBE426"
                 },
                 "philtrum": {
                     "ids": [
@@ -757,7 +757,7 @@ const INITIAL_PROFILE_EXPORT = {
                         165
                     ],
                     "openSpline": false,
-                    "color": "#5900b3"
+                    "color": "#FA0087"
                 }
             }
         },
