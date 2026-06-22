@@ -447,7 +447,8 @@
             144,
             7
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#ff0000"
         },
         "left_iris": {
           "ids": [
@@ -456,7 +457,8 @@
             474,
             477
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#00cc33"
         },
         "right_eye": {
           "ids": [
@@ -471,7 +473,8 @@
             373,
             249
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#3333ff"
         },
         "right_iris": {
           "ids": [
@@ -480,7 +483,8 @@
             469,
             472
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#ffff00"
         },
         "left_eyebrow": {
           "ids": [
@@ -497,7 +501,8 @@
             105,
             66
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#ff00ff"
         },
         "right_eyebrow": {
           "ids": [
@@ -514,7 +519,8 @@
             295,
             285
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#00e6e6"
         },
         "left_socket": {
           "ids": [
@@ -535,7 +541,8 @@
             117,
             111
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#ff8000"
         },
         "right_socket": {
           "ids": [
@@ -556,7 +563,8 @@
             346,
             340
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#9900ff"
         }
       },
       "mouth": {
@@ -589,7 +597,8 @@
             39,
             37
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#4ce600"
         },
         "lip_lower": {
           "ids": [
@@ -620,7 +629,8 @@
             178,
             87
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#ff0080"
         },
         "mouth_outer": {
           "ids": [
@@ -641,7 +651,8 @@
             106,
             43
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#00bfff"
         },
         "mouth_inner": {
           "ids": [
@@ -666,7 +677,8 @@
             91,
             146
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#ffbf00"
         }
       },
       "nose": {
@@ -698,7 +710,8 @@
             55,
             107
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#00e699"
         },
         "right_nostril": {
           "ids": [
@@ -709,7 +722,8 @@
             458,
             309
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#ff4000"
         },
         "left_nostril": {
           "ids": [
@@ -720,7 +734,8 @@
             75,
             166
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#8080ff"
         },
         "bridge": {
           "ids": [
@@ -739,7 +754,8 @@
             55,
             107
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#99e600"
         }
       },
       "face": {
@@ -771,7 +787,8 @@
             57,
             212
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#ff66cc"
         },
         "forehead": {
           "ids": [
@@ -800,7 +817,8 @@
             54,
             67
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#3385ff"
         },
         "left_cheek": {
           "ids": [
@@ -825,7 +843,8 @@
             118,
             119
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#2e992e"
         },
         "left_jaw": {
           "ids": [
@@ -844,7 +863,8 @@
             132,
             93
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#e60039"
         },
         "right_cheek": {
           "ids": [
@@ -869,7 +889,8 @@
             371,
             329
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#ad26d9"
         },
         "right_jaw": {
           "ids": [
@@ -888,7 +909,8 @@
             361,
             323
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#00b359"
         },
         "left_temple": {
           "ids": [
@@ -903,7 +925,8 @@
             234,
             127
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#005c99"
         },
         "right_temple": {
           "ids": [
@@ -918,7 +941,8 @@
             383,
             368
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#b35900"
         },
         "symetry_axis": {
           "ids": [
@@ -951,7 +975,8 @@
             175,
             152
           ],
-          "openSpline": true
+          "openSpline": true,
+          "color": "#009966"
         },
         "philtrum": {
           "ids": [
@@ -967,7 +992,8 @@
             39,
             165
           ],
-          "openSpline": false
+          "openSpline": false,
+          "color": "#5900b3"
         }
       }
     },

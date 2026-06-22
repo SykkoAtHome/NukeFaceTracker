@@ -2457,6 +2457,38 @@ def _set_roto_shape_closed_state(shape, is_closed, frame=None, contour_name=""):
     return state_set
 
 
+def _set_roto_shape_color(shape, color_list, frame=None, contour_name=""):
+    if not color_list or len(color_list) < 3:
+        return False
+    state_set = False
+    errors = []
+
+    try:
+        import _curvelib
+        attrs = shape.getAttributes()
+        for attr_frame in (0, frame):
+            if attr_frame is not None:
+                # Set individual RGB channels on the shape attributes
+                if hasattr(_curvelib.AnimAttributes, "kRedAttribute"):
+                    attrs.set(int(attr_frame), _curvelib.AnimAttributes.kRedAttribute, float(color_list[0]))
+                if hasattr(_curvelib.AnimAttributes, "kGreenAttribute"):
+                    attrs.set(int(attr_frame), _curvelib.AnimAttributes.kGreenAttribute, float(color_list[1]))
+                if hasattr(_curvelib.AnimAttributes, "kBlueAttribute"):
+                    attrs.set(int(attr_frame), _curvelib.AnimAttributes.kBlueAttribute, float(color_list[2]))
+                if len(color_list) > 3 and hasattr(_curvelib.AnimAttributes, "kAlphaAttribute"):
+                    attrs.set(int(attr_frame), _curvelib.AnimAttributes.kAlphaAttribute, float(color_list[3]))
+        state_set = True
+    except Exception as e:
+        errors.append(str(e))
+
+    if not state_set:
+        print(
+            f"[NukeFaceTracker] WARNING: Could not set color "
+            f"for contour '{contour_name}': {'; '.join(errors)}"
+        )
+    return state_set
+
+
 def _nuke_hex_float(value):
     import struct
     return "x" + struct.pack(">f", float(value)).hex()
@@ -2569,6 +2601,12 @@ def _animate_pasted_open_roto_contours(roto_node, open_contours):
         shape = _find_roto_shape_by_name(root_layer, group_name)
         if shape is None:
             continue
+
+        # Set the custom color if available from loaded mapping profile
+        color_list = getattr(landmarks_config, "ROTO_CONTOUR_COLORS", {}).get(group_name)
+        if color_list:
+            _set_roto_shape_color(shape, color_list, 0, group_name)
+
         sorted_frames = sorted(int(frame) for frame in frame_data.keys())
         num_points = len(frame_data[str(sorted_frames[0])])
         for frame in sorted_frames:
@@ -2709,6 +2747,11 @@ def generate_roto_node(parent_node, json_path, width, height):
             # 1. Create the Shape object
             shape = rp.Shape(curves_knob)
             shape.name = group_name
+
+            # Set the custom color if available from loaded mapping profile
+            color_list = getattr(landmarks_config, "ROTO_CONTOUR_COLORS", {}).get(group_name)
+            if color_list:
+                _set_roto_shape_color(shape, color_list, first_frame, group_name)
 
             is_closed = group_name not in getattr(landmarks_config, "OPEN_CONTOUR_GROUPS", set())
             _set_roto_shape_closed_state(shape, is_closed, first_frame, group_name)
