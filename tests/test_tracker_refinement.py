@@ -973,6 +973,119 @@ class TestTrackerRefinement(unittest.TestCase):
         mock_curves.fromScript.assert_not_called()
         mock_nuke.nodePaste.assert_called_once()
 
+    def test_generate_roto_node_applies_colors(self):
+        """Test that generate_roto_node retrieves colors from ROTO_CONTOUR_COLORS and applies them to shapes."""
+        import json
+
+        # Mock parent_node
+        mock_parent = MagicMock()
+        mock_parent.name.return_value = "FaceTrackerRoto"
+        mock_parent.parent.return_value = MagicMock()
+
+        knobs = self.make_roto_knobs(roto_face_chin=True, roto_bezier=False,
+                                     start_frame=1, end_frame=1)
+        mock_parent.__getitem__.side_effect = lambda key: knobs[key]
+
+        dummy_roto_data = {
+            "roto_face_chin": {
+                "1": [[100.0, 200.0], [150.0, 250.0]]
+            }
+        }
+
+        # Mock nuke.rotopaint
+        mock_rp = MagicMock()
+        sys.modules['nuke.rotopaint'] = mock_rp
+        mock_nuke.rotopaint = mock_rp
+
+        # Mock _curvelib with its attribute constants
+        mock_curvelib = MagicMock()
+        mock_curvelib.AnimAttributes.kRedAttribute = 101
+        mock_curvelib.AnimAttributes.kGreenAttribute = 102
+        mock_curvelib.AnimAttributes.kBlueAttribute = 103
+        mock_curvelib.AnimAttributes.kAlphaAttribute = 104
+        sys.modules['_curvelib'] = mock_curvelib
+
+        mock_shape = MagicMock()
+        mock_rp.Shape.return_value = mock_shape
+
+        mock_nuke.allNodes.return_value = []
+        mock_nuke.createNode.return_value = MagicMock()
+
+        # Set up a mock custom color in ROTO_CONTOUR_COLORS
+        test_color = [0.1, 0.2, 0.3, 1.0]
+        with patch.dict(nuke_tracker.landmarks_config.ROTO_CONTOUR_COLORS, {"roto_face_chin": test_color}):
+            with patch("os.path.exists", return_value=True), \
+                 patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(dummy_roto_data))):
+                success = nuke_tracker.generate_roto_node(mock_parent, "dummy_roto.json", 1920, 1080)
+                self.assertTrue(success)
+
+        # Assert channels were set on AnimAttributes using _curvelib constants at frames 0 and first_frame (1)
+        mock_shape.getAttributes().set.assert_any_call(0, 101, 0.1)
+        mock_shape.getAttributes().set.assert_any_call(0, 102, 0.2)
+        mock_shape.getAttributes().set.assert_any_call(0, 103, 0.3)
+        mock_shape.getAttributes().set.assert_any_call(0, 104, 1.0)
+        mock_shape.getAttributes().set.assert_any_call(1, 101, 0.1)
+        mock_shape.getAttributes().set.assert_any_call(1, 102, 0.2)
+        mock_shape.getAttributes().set.assert_any_call(1, 103, 0.3)
+        mock_shape.getAttributes().set.assert_any_call(1, 104, 1.0)
+
+    def test_generate_roto_node_open_contours_applies_colors(self):
+        """Test that open contours also have their colors applied during Roto export."""
+        import json
+
+        mock_parent = MagicMock()
+        mock_parent.name.return_value = "FaceTrackerRoto"
+        mock_parent.parent.return_value = MagicMock()
+
+        # Roto_face_symmetry_axis is an open contour
+        knobs = self.make_roto_knobs(roto_face_symmetry_axis=True, roto_bezier=False,
+                                     start_frame=1, end_frame=1)
+        mock_parent.__getitem__.side_effect = lambda key: knobs[key]
+
+        dummy_roto_data = {
+            "roto_face_symmetry_axis": {
+                "1": [[100.0, 200.0], [150.0, 250.0]]
+            }
+        }
+
+        mock_rp = MagicMock()
+        sys.modules['nuke.rotopaint'] = mock_rp
+        mock_nuke.rotopaint = mock_rp
+
+        # Mock _curvelib
+        mock_curvelib = MagicMock()
+        mock_curvelib.AnimAttributes.kRedAttribute = 101
+        mock_curvelib.AnimAttributes.kGreenAttribute = 102
+        mock_curvelib.AnimAttributes.kBlueAttribute = 103
+        mock_curvelib.AnimAttributes.kAlphaAttribute = 104
+        sys.modules['_curvelib'] = mock_curvelib
+
+        mock_open_roto = MagicMock()
+        mock_curves = MagicMock()
+        mock_root = MagicMock()
+
+        # We mock find_roto_shape_by_name to return our mock open shape
+        mock_open_shape = MagicMock()
+        mock_root.__getitem__.return_value = mock_open_shape
+        mock_curves.rootLayer = mock_root
+        mock_open_roto.__getitem__.side_effect = lambda key: mock_curves if key == "curves" else MagicMock()
+        mock_nuke.allNodes.return_value = []
+        mock_nuke.nodePaste.return_value = mock_open_roto
+
+        test_color = [0.4, 0.5, 0.6, 1.0]
+        with patch("nuke_tracker._find_roto_shape_by_name", return_value=mock_open_shape):
+            with patch.dict(nuke_tracker.landmarks_config.ROTO_CONTOUR_COLORS, {"roto_face_symmetry_axis": test_color}):
+                with patch("os.path.exists", return_value=True), \
+                     patch("builtins.open", unittest.mock.mock_open(read_data=json.dumps(dummy_roto_data))):
+                    success = nuke_tracker.generate_roto_node(mock_parent, "dummy_roto.json", 1920, 1080)
+                    self.assertTrue(success)
+
+        # Assert channels were set on AnimAttributes for open contours
+        mock_open_shape.getAttributes().set.assert_any_call(0, 101, 0.4)
+        mock_open_shape.getAttributes().set.assert_any_call(0, 102, 0.5)
+        mock_open_shape.getAttributes().set.assert_any_call(0, 103, 0.6)
+        mock_open_shape.getAttributes().set.assert_any_call(0, 104, 1.0)
+
     def test_generate_tracker_node_expands_dense_contour_groups(self):
         """Dense tracker export expands grouped contour JSON into one Tracker4 track per point."""
         import json

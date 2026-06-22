@@ -8,6 +8,28 @@ import re
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_MAPPING_PATH = os.path.join(PLUGIN_DIR, "default_mapping.json")
 
+def hex_to_rgb(hex_str):
+    if not hex_str:
+        return None
+    hex_str = hex_str.lstrip('#')
+    try:
+        if len(hex_str) == 6:
+            r = int(hex_str[0:2], 16) / 255.0
+            g = int(hex_str[2:4], 16) / 255.0
+            b = int(hex_str[4:6], 16) / 255.0
+            return [r, g, b, 1.0]
+        elif len(hex_str) == 8:
+            r = int(hex_str[0:2], 16) / 255.0
+            g = int(hex_str[2:4], 16) / 255.0
+            b = int(hex_str[4:6], 16) / 255.0
+            a = int(hex_str[6:8], 16) / 255.0
+            return [r, g, b, a]
+    except Exception:
+        pass
+    return None
+
+ROTO_CONTOUR_COLORS = {}
+
 # --- SPARSE LANDMARK GROUPS ---
 LANDMARK_GROUPS = {
     "Nose": {
@@ -353,6 +375,7 @@ def _build_roto_contours():
     contours = {}
     open_groups = set()
     knob_specs = []
+    colors = {}
 
     for parent_key, parent_name, child_name, value in _iter_profile_children("roto"):
         ids = _coerce_ids(value)
@@ -364,12 +387,17 @@ def _build_roto_contours():
         if isinstance(value, dict) and value.get("openSpline"):
             open_groups.add(contour_name)
 
+        if isinstance(value, dict) and value.get("color"):
+            rgb = hex_to_rgb(value["color"])
+            if rgb:
+                colors[contour_name] = rgb
+
         knob_name = "roto_{}_{}".format(_sanitize_token(parent_name), _sanitize_token(child_name))
         label = "{} / {} ({} pts)".format(_display_label(parent_name), _display_label(child_name), len(ids))
         default_value = parent_key in ("face", "mouth", "eyes")
         knob_specs.append((knob_name, contour_name, label, default_value))
 
-    return contours, tuple(open_groups), tuple(knob_specs)
+    return contours, tuple(open_groups), tuple(knob_specs), colors
 
 
 def _build_grid_landmarks(grid_mapping):
@@ -419,6 +447,7 @@ def load_mapping(path=None):
     global CONTOUR_GROUPS, ROTO_CONTOUR_GROUP_NAMES, ROTO_CONTOUR_KNOB_SPECS
     global OPEN_CONTOUR_GROUPS, ALL_LANDMARKS, INDEX_TO_NAME
     global GRID_MAPPING, GRID_LANDMARKS, TRACKER_DENSITY_LABELS
+    global ROTO_CONTOUR_COLORS
 
     resolved_path = path or DEFAULT_MAPPING_PATH
     resolved_path = os.path.abspath(os.path.expanduser(resolved_path))
@@ -438,7 +467,7 @@ def load_mapping(path=None):
 
     LANDMARK_GROUPS = PROFILE_LANDMARKS.get("sparse", {})
     SPARSE_PART_TO_LANDMARKS = LANDMARK_GROUPS
-    CONTOUR_GROUPS, OPEN_CONTOUR_GROUPS, ROTO_CONTOUR_KNOB_SPECS = _build_roto_contours()
+    CONTOUR_GROUPS, OPEN_CONTOUR_GROUPS, ROTO_CONTOUR_KNOB_SPECS, ROTO_CONTOUR_COLORS = _build_roto_contours()
     ROTO_CONTOUR_GROUP_NAMES = tuple(CONTOUR_GROUPS.keys())
     DENSE_PART_TO_CONTOURS = {}
 
