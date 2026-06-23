@@ -65,6 +65,9 @@ def find_upstream_read(node):
 
         # If input 0 is not connected, check other inputs as fallback (e.g., Merge with only A connected)
         for i in range(1, node.inputs()):
+            # If this is our FaceTracker group, do not traverse into port 2 (Expression_Face)
+            if node.Class() == "Group" and node.name().startswith("FaceTracker") and i == 2:
+                continue
             other_input = node.input(i)
             if other_input:
                 result = find_upstream_read(other_input)
@@ -78,6 +81,7 @@ def _resolve_output_json_path(node):
     """Pure resolver: returns the output JSON path for the node without mutating state."""
     # Check if we should write results to a custom file
     write_to_file = node['write_to_file'].value() if 'write_to_file' in node.knobs() else False
+    target = node['track_target'].value() if 'track_target' in node.knobs() else 'source'
 
     if not write_to_file:
         # Default to a safe, stable path inside Nuke's native temp directory
@@ -88,13 +92,22 @@ def _resolve_output_json_path(node):
             temp_dir = os.path.join(tempfile.gettempdir(), "nuke")
             
         temp_dir = os.path.join(temp_dir, "facetracker").replace("\\", "/")
-        return os.path.join(temp_dir, f"{node.name()}_data.json").replace("\\", "/")
+        return os.path.join(temp_dir, f"{node.name()}_{target}_data.json").replace("\\", "/")
 
     current_val = node['output_json'].value()
     if not current_val or "temp_tracker_data" in current_val:
         directory = os.path.dirname(current_val) if current_val else plugin_dir
-        return os.path.join(directory, "temp_tracker_data_{}.json".format(node.name())).replace("\\", "/")
-    return current_val
+        return os.path.join(directory, "temp_tracker_data_{}_{}.json".format(node.name(), target)).replace("\\", "/")
+
+    # Swapping logic for custom path suffixes
+    base, ext = os.path.splitext(current_val)
+    if base.endswith('_source'):
+        base_clean = base[:-7]
+    elif base.endswith('_expression'):
+        base_clean = base[:-11]
+    else:
+        base_clean = base
+    return f"{base_clean}_{target}.json".replace("\\", "/")
 
 
 def _ensure_unique_output_json(node):
@@ -437,6 +450,15 @@ def _build_tracking_tab(node, start_frame, end_frame):
     # Settings Section
     node.addKnob(nuke.Text_Knob("divider_settings", "Settings", ""))
 
+    track_target_knob = nuke.Enumeration_Knob('track_target', 'Track Target', ['source', 'expression'])
+    track_target_knob.setTooltip("Select which input stream to track:\n- source: Tracks the main face connected to the 'Source' port (input 0).\n- expression: Tracks the expression face connected to the 'Expression_Face' port (input 2).")
+    node.addKnob(track_target_knob)
+    track_target_knob.setVisible(False)
+
+    refresh_inputs_btn = nuke.PyScript_Knob('refresh_inputs', 'Refresh Inputs', 'import nuke_tracker; nuke_tracker.update_track_target_visibility(nuke.thisNode())')
+    refresh_inputs_btn.setTooltip("Refresh input ports and visibility of tracking target settings.")
+    node.addKnob(refresh_inputs_btn)
+
     mode_knob = nuke.Enumeration_Knob("mode", "Tracking Mode", ["Video (Smooth / Stabilized)", "Image (Frame-by-Frame)"])
     mode_knob.setTooltip("Video mode uses temporal tracking (Kalman filters) to eliminate frame-to-frame landmark jitter.\n\nImage mode runs raw face detection on each frame independently.")
     node.addKnob(mode_knob)
@@ -645,6 +667,49 @@ def _build_blendshapes_tab(node):
             create_blendshapes_btn.setTooltip("Blendshapes data not found. Please re-run Track Face to generate it.")
 
 
+def update_track_target_visibility(node):
+    """Updates the visibility of 'track_target' based on whether input 2 (Expression_Face) is connected."""
+    if 'track_target' not in node.knobs():
+        return
+    
+    # Check if we have an active input connected to port 2 (Expression_Face)
+    has_input_2 = (node.inputs() > 2 and node.input(2) is not None)
+    
+    node['track_target'].setVisible(has_input_2)
+    
+    # If not connected, force the target back to 'source'
+    if not has_input_2:
+        node['track_target'].setValue('source')
+        
+    # Always ensure the rest of the knobs' states are updated accordingly
+    update_knob_visibility_on_target_change(node)
+
+
+def update_knob_visibility_on_target_change(node):
+    """Updates knob visibility and enablement when the tracking target changes."""
+    if 'track_target' not in node.knobs():
+        return
+        
+    target = node['track_target'].value()
+    is_expression = (target == 'expression')
+    
+    # If expression target is active, we disable refine_smartvectors because SmartVector is from Source stream
+    if 'refine_smartvectors' in node.knobs():
+        refine_knob = node['refine_smartvectors']
+        if is_expression:
+            refine_knob.setValue(False)
+            refine_knob.setEnabled(False)
+        else:
+            refine_knob.setEnabled(True)
+            
+        # Also ensure anchor_stiffness is updated accordingly
+        if 'anchor_stiffness' in node.knobs():
+            node['anchor_stiffness'].setVisible(refine_knob.value() and refine_knob.enabled())
+            
+    # Update unique JSON path when target changes
+    _ensure_unique_output_json(node)
+
+
 def _capture_knob_values(node, names):
     """Return a dict of current values for the named knobs, ignoring any errors."""
     values = {}
@@ -719,7 +784,7 @@ def _build_knob_changed_script():
         "n = nuke.thisNode()\n"
         "k = nuke.thisKnob()\n"
         "if k.name() == 'refine_smartvectors':\n"
-        "    n['anchor_stiffness'].setVisible(k.value())\n"
+        "    n['anchor_stiffness'].setVisible(k.value() and k.enabled())\n"
         "elif k.name() == 'landmark_density':\n"
         "    density = k.value()\n"
         "    is_full = ('Full' in density)\n"
@@ -729,6 +794,12 @@ def _build_knob_changed_script():
         "elif k.name().startswith('roto_group_'):\n"
         "    import nuke_tracker\n"
         "    nuke_tracker.set_roto_group_selection(n, k.name(), k.value())\n"
+        "elif k.name() in ('inputChange', 'showPanel'):\n"
+        "    import nuke_tracker\n"
+        "    nuke_tracker.update_track_target_visibility(n)\n"
+        "elif k.name() == 'track_target':\n"
+        "    import nuke_tracker\n"
+        "    nuke_tracker.update_knob_visibility_on_target_change(n)\n"
     )
 
 
@@ -747,9 +818,15 @@ def create_face_tracker_node():
     with node:
         input_source = nuke.createNode('Input', inpanel=False)
         input_source.setName("Source")
+        input_source['label'].setValue('Source_Face')
 
         input_vectors = nuke.createNode('Input', inpanel=False)
         input_vectors.setName("SmartVector")
+
+        expr_input = nuke.createNode('Input', inpanel=False)
+        expr_input.setName("Expression_Face")
+        expr_input['number'].setValue(2)
+        expr_input['label'].setValue('Expression_Face')
 
         output = nuke.createNode('Output', inpanel=False)
         output.setInput(0, input_source)
@@ -789,10 +866,18 @@ def _validate_tracking_inputs(node):
     tracking run needs. Returns a params dict on success, or None after showing
     a nuke.message explaining the failure.
     """
-    input_node = node.input(0)
-    if not input_node:
-        nuke.message("Please connect the Face Tracker node to an input node first.")
-        return None
+    target = node['track_target'].value() if 'track_target' in node.knobs() else 'source'
+    
+    if target == 'expression':
+        input_node = node.input(2)
+        if not input_node:
+            nuke.message("Please connect the 'Expression_Face' input (port 2) first.")
+            return None
+    else:
+        input_node = node.input(0)
+        if not input_node:
+            nuke.message("Please connect the Face Tracker node to an input node first.")
+            return None
 
     refine_enabled = node['refine_smartvectors'].value()
     backtrack_enabled = node['backtrack'].value() if 'backtrack' in node.knobs() else False
@@ -852,6 +937,7 @@ def _validate_tracking_inputs(node):
         'landmarks_str': landmarks_str,
         'width': width,
         'height': height,
+        'track_target': target,
     }
 
 
@@ -931,10 +1017,13 @@ def _render_input_stream(node, start_frame, end_frame, temp_file_pattern):
     finally block. Raises on missing internal Source node.
     """
     # Create temporary Write node inside the Group context to render the active stream
+    target = node['track_target'].value() if 'track_target' in node.knobs() else 'source'
+    internal_name = "Source" if target == 'source' else "Expression_Face"
+    
     with node:
-        internal_source = node.node("Source")
+        internal_source = node.node(internal_name)
         if not internal_source:
-            raise ValueError("Internal 'Source' input node not found within FaceTracker Group.")
+            raise ValueError("Internal '{}' input node not found within FaceTracker Group.".format(internal_name))
 
         write_node = nuke.nodes.Write()
         write_node.setInput(0, internal_source)

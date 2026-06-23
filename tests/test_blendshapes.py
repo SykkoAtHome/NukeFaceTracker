@@ -51,37 +51,44 @@ class TestBlendshapes(unittest.TestCase):
     def test_load_tracker_json_ignores_sidecar(self):
         """Test that existing trackers can read the main JSON without being affected by the sidecar."""
         from unittest.mock import MagicMock
-        sys.modules['nuke'] = MagicMock()
-        import nuke_tracker
-        
-        temp_dir = tempfile.mkdtemp()
+        original_nuke = sys.modules.get('nuke')
+        if 'nuke' not in sys.modules:
+            sys.modules['nuke'] = MagicMock()
         try:
-            main_json = os.path.join(temp_dir, "tracker_data.json")
-            sidecar_json = os.path.join(temp_dir, "tracker_data.blendshapes.json")
-            
-            # Create mock main tracker data
-            main_data = {"1": {"face_contour": [[100, 100], [200, 200]]}}
-            with open(main_json, "w") as f:
-                json.dump(main_data, f)
+            import nuke_tracker
+            temp_dir = tempfile.mkdtemp()
+            try:
+                main_json = os.path.join(temp_dir, "tracker_data.json")
+                sidecar_json = os.path.join(temp_dir, "tracker_data.blendshapes.json")
                 
-            # Create mock blendshapes sidecar
-            sidecar_data = {"1": {"_neutral": 0.0, "jawOpen": 1.0}}
-            with open(sidecar_json, "w") as f:
-                json.dump(sidecar_data, f)
+                # Create mock main tracker data
+                main_data = {"1": {"face_contour": [[100, 100], [200, 200]]}}
+                with open(main_json, "w") as f:
+                    json.dump(main_data, f)
+                    
+                # Create mock blendshapes sidecar
+                sidecar_data = {"1": {"_neutral": 0.0, "jawOpen": 1.0}}
+                with open(sidecar_json, "w") as f:
+                    json.dump(sidecar_data, f)
+                    
+                # Attempt to load blendshapes via nuke_tracker's function
+                loaded_bs = nuke_tracker._load_blendshapes(main_json)
+                self.assertEqual(loaded_bs, sidecar_data)
                 
-            # Attempt to load blendshapes via nuke_tracker's function
-            loaded_bs = nuke_tracker._load_blendshapes(main_json)
-            self.assertEqual(loaded_bs, sidecar_data)
-            
-            # Verify standard loading doesn't implicitly pull sidecar data into the main load
-            with open(main_json, "r") as f:
-                loaded_main = json.load(f)
-                
-            self.assertIn("face_contour", loaded_main["1"])
-            self.assertNotIn("jawOpen", loaded_main["1"])
-            self.assertNotIn("_neutral", loaded_main["1"])
+                # Verify standard loading doesn't implicitly pull sidecar data into the main load
+                with open(main_json, "r") as f:
+                    loaded_main = json.load(f)
+                    
+                self.assertIn("face_contour", loaded_main["1"])
+                self.assertNotIn("jawOpen", loaded_main["1"])
+                self.assertNotIn("_neutral", loaded_main["1"])
+            finally:
+                shutil.rmtree(temp_dir)
         finally:
-            shutil.rmtree(temp_dir)
+            if original_nuke is not None:
+                sys.modules['nuke'] = original_nuke
+            elif 'nuke' in sys.modules:
+                del sys.modules['nuke']
 
 if __name__ == '__main__':
     unittest.main()

@@ -16,8 +16,12 @@ if backend_dir not in sys.path:
     sys.path.append(backend_dir)
 
 # 2. Mock Nuke Python API prior to importing nuke_tracker
-mock_nuke = MagicMock()
-sys.modules['nuke'] = mock_nuke
+if 'nuke' in sys.modules:
+    mock_nuke = sys.modules['nuke']
+else:
+    mock_nuke = MagicMock()
+    sys.modules['nuke'] = mock_nuke
+
 
 # Now import nuke_tracker with mocked nuke module
 import nuke_tracker
@@ -88,7 +92,7 @@ class TestTrackerRefinement(unittest.TestCase):
         root.firstFrame.return_value = 101
         root.lastFrame.return_value = 240
         mock_nuke.root.return_value = root
-        mock_nuke.createNode.side_effect = [node, MagicMock(), MagicMock(), MagicMock()]
+        mock_nuke.createNode.side_effect = [node, MagicMock(), MagicMock(), MagicMock(), MagicMock()]
 
         with patch("nuke_tracker._build_tracking_tab") as build_tracking_tab, \
              patch("nuke_tracker._build_tracker_tab"), \
