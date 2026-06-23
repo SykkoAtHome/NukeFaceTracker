@@ -66,7 +66,7 @@ def find_upstream_read(node):
         # If input 0 is not connected, check other inputs as fallback (e.g., Merge with only A connected)
         for i in range(1, node.inputs()):
             # If this is our FaceTracker group, do not traverse into port 2 (Expression_Face)
-            if node.Class() == "Group" and node.name().startswith("FaceTracker") and i == 2:
+            if node.Class() == "Group" and 'track_target' in node.knobs() and i == 2:
                 continue
             other_input = node.input(i)
             if other_input:
@@ -95,19 +95,23 @@ def _resolve_output_json_path(node):
         return os.path.join(temp_dir, f"{node.name()}_{target}_data.json").replace("\\", "/")
 
     current_val = node['output_json'].value()
-    if not current_val or "temp_tracker_data" in current_val:
+    if not current_val or "temp_tracker" in current_val:
         directory = os.path.dirname(current_val) if current_val else plugin_dir
-        return os.path.join(directory, "temp_tracker_data_{}_{}.json".format(node.name(), target)).replace("\\", "/")
+        return os.path.join(directory, "temp_tracker_{}_{}_data.json".format(node.name(), target)).replace("\\", "/")
 
     # Swapping logic for custom path suffixes
     base, ext = os.path.splitext(current_val)
-    if base.endswith('_source'):
+    if base.endswith('_source_data'):
+        base_clean = base[:-12]
+    elif base.endswith('_expression_data'):
+        base_clean = base[:-16]
+    elif base.endswith('_source'):
         base_clean = base[:-7]
     elif base.endswith('_expression'):
         base_clean = base[:-11]
     else:
         base_clean = base
-    return f"{base_clean}_{target}.json".replace("\\", "/")
+    return f"{base_clean}_{target}_data.json".replace("\\", "/")
 
 
 def _ensure_unique_output_json(node):
@@ -192,9 +196,25 @@ def find_vector_channels(node):
 
 
 
+def _resolve_target_input_node(node, target=None):
+    """Resolve the active upstream input node based on the tracking target.
+    If target is None, reads the current value of the 'track_target' knob.
+    """
+    if target is None:
+        if node and 'track_target' in node.knobs():
+            target = node['track_target'].value()
+        else:
+            target = 'source'
+
+    if target == 'expression':
+        return node.input(2)
+    return node.input(0)
+
+
 def _resolve_root_frame_range():
     """Return the project frame range from the Nuke root settings."""
     return int(nuke.root().firstFrame()), int(nuke.root().lastFrame())
+
 
 
 def _resolve_input_frame_range(input_node):
@@ -223,15 +243,20 @@ def _resolve_input_frame_range(input_node):
 
 def set_range_to_input(node):
     """Callback function to sync the node's frame range to its active upstream input."""
-    input_node = node.input(0)
+    target = node['track_target'].value() if 'track_target' in node.knobs() else 'source'
+    input_node = _resolve_target_input_node(node, target)
     if not input_node:
-        nuke.message("No input node connected to this Face Tracker.\nPlease connect it to a Read node pipeline.")
+        if target == 'expression':
+            nuke.message("No input node connected to the 'Expression_Face' input (port 2).")
+        else:
+            nuke.message("No input node connected to this Face Tracker.\nPlease connect it to a Read node pipeline.")
         return
 
     start, end = _resolve_input_frame_range(input_node)
 
     node['start_frame'].setValue(start)
     node['end_frame'].setValue(end)
+
 
 
 def get_active_tracker_parts(node):
@@ -815,6 +840,11 @@ def create_face_tracker_node():
     node['tile_color'].setValue(0xff8c00ff)
 
     # Setup internal pipeline for the Group node
+    # PORT LAYOUT AND COMPATIBILITY:
+    # - Port 0 (Source): Main input stream (Source_Face).
+    # - Port 1 (SmartVector): Motion vector input for tracking refinement. Do NOT change this.
+    # - Port 2 (Expression_Face): Reference expression input stream. Excluded from upstream image traversal.
+    # Group Output only forwards Port 0 (Source).
     with node:
         input_source = nuke.createNode('Input', inpanel=False)
         input_source.setName("Source")
@@ -867,19 +897,20 @@ def _validate_tracking_inputs(node):
     a nuke.message explaining the failure.
     """
     target = node['track_target'].value() if 'track_target' in node.knobs() else 'source'
-    
-    if target == 'expression':
-        input_node = node.input(2)
-        if not input_node:
+    input_node = _resolve_target_input_node(node, target)
+    if not input_node:
+        if target == 'expression':
             nuke.message("Please connect the 'Expression_Face' input (port 2) first.")
-            return None
-    else:
-        input_node = node.input(0)
-        if not input_node:
+        else:
             nuke.message("Please connect the Face Tracker node to an input node first.")
-            return None
+        return None
 
     refine_enabled = node['refine_smartvectors'].value()
+    if target == 'expression' and refine_enabled:
+        nuke.message("SmartVector refinement is not supported when tracking the expression target.\nDisabling refinement.")
+        refine_enabled = False
+        node['refine_smartvectors'].setValue(False)
+
     backtrack_enabled = node['backtrack'].value() if 'backtrack' in node.knobs() else False
     vector_node = None
     u_channel = None
@@ -3084,10 +3115,10 @@ def generate_roto_node(parent_node, json_path, width, height):
     return True
 
 
-def _resolve_input_dimensions(node):
+def _resolve_input_dimensions(node, target=None):
     """Resolve the (width, height) of the node's active input, falling back to the
     root format when there is no input or the input format cannot be evaluated."""
-    input_node = node.input(0)
+    input_node = _resolve_target_input_node(node, target)
     if input_node:
         try:
             return input_node.format().width(), input_node.format().height()
@@ -3106,7 +3137,9 @@ def _export_from_panel(node, builder):
     if not json_path:
         nuke.message("Please specify a valid output JSON file path first.")
         return False
-    width, height = _resolve_input_dimensions(node)
+
+    target = node['track_target'].value() if 'track_target' in node.knobs() else 'source'
+    width, height = _resolve_input_dimensions(node, target)
     return builder(node, json_path, width, height)
 
 
