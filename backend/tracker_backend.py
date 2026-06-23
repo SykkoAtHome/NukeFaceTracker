@@ -7,6 +7,14 @@ import re
 # Import landmarks configurations
 import landmarks_config
 
+def _serialize_blendshapes(categories):
+    """Safely extracts blendshape category scores into a dictionary."""
+    if not categories:
+        return {}
+    return {
+        cat.category_name: round(cat.score, 4)
+        for cat in categories
+    }
 
 def _load_mediapipe():
     """Lazily import OpenCV and MediaPipe.
@@ -146,11 +154,7 @@ def run_tracking_pass(frame_sequence, options, args, is_sequence, width, height,
                     landmarks = detection_result.face_landmarks[0]
 
                     if hasattr(detection_result, 'face_blendshapes') and detection_result.face_blendshapes:
-                        frame_bs = {
-                            cat.category_name: round(cat.score, 4)
-                            for cat in detection_result.face_blendshapes[0]
-                        }
-                        blendshapes_data[str(frame_num)] = frame_bs
+                        blendshapes_data[str(frame_num)] = _serialize_blendshapes(detection_result.face_blendshapes[0])
 
                     # Fetch coordinates for each contour group sequentially
                     for group_name, indices in contours_to_track.items():
@@ -312,7 +316,7 @@ def main():
             if blendshapes_data:
                 blendshapes_path = args.output.replace(".json", ".blendshapes.json")
                 with open(blendshapes_path, "w") as f:
-                    json.dump(blendshapes_data, f, indent=4)
+                    json.dump(blendshapes_data, f, indent=2)
                     
             print(f"[SUCCESS] Tracking data successfully saved to: {args.output}")
         except Exception as e:

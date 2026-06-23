@@ -1,3 +1,15 @@
+"""
+Configuration and metadata for ARKit Face Blendshapes.
+
+This module defines the canonical order and naming of the 52 ARKit blendshapes 
+exactly as they are emitted by the MediaPipe FaceLandmarker model.
+
+Note:
+    - Index 0 is always `_neutral` and represents the base, resting state of the face. 
+    - The `_neutral` blendshape is usually hidden in the Nuke UI since it doesn't represent 
+      a specific muscle actuation, but it is kept here to maintain 1:1 index alignment 
+      with the raw MediaPipe output arrays.
+"""
 from typing import Dict, Tuple
 
 # Full list of 52 ARKit blendshapes in the exact order emitted by MediaPipe FaceLandmarker.

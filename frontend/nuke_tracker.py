@@ -23,6 +23,12 @@ try:
 except ImportError:
     tracker_utils = None
 
+try:
+    import blendshapes_config
+except ImportError:
+    blendshapes_config = None
+
+
 
 def find_upstream_read(node):
     """Recursively traverses upstream following the active image pipeline to find the
@@ -1122,19 +1128,41 @@ def _merge_backtrack_passes(output_fwd, output_bwd, output_json, task):
         # Also merge and write blendshapes sidecar if present
         fwd_bs_path = output_fwd.replace('.json', '.blendshapes.json')
         bwd_bs_path = output_bwd.replace('.json', '.blendshapes.json')
-        merged_bs = {}
         
+        bwd_bs_data = {}
+        fwd_bs_data = {}
         if os.path.exists(bwd_bs_path):
             with open(bwd_bs_path, "r") as f:
-                merged_bs.update(json.load(f))
+                bwd_bs_data = json.load(f)
         if os.path.exists(fwd_bs_path):
             with open(fwd_bs_path, "r") as f:
-                merged_bs.update(json.load(f))
+                fwd_bs_data = json.load(f)
                 
+        merged_bs = {}
+        if bwd_bs_data or fwd_bs_data:
+            all_frames = set(fwd_bs_data.keys()).union(set(bwd_bs_data.keys()))
+            for frame in all_frames:
+                fwd_frame = fwd_bs_data.get(frame)
+                bwd_frame = bwd_bs_data.get(frame)
+                if fwd_frame and bwd_frame:
+                    merged_bs[frame] = {}
+                    for bs_name in fwd_frame.keys():
+                        if bs_name in bwd_frame:
+                            merged_bs[frame][bs_name] = round((fwd_frame[bs_name] + bwd_frame[bs_name]) / 2.0, 4)
+                        else:
+                            merged_bs[frame][bs_name] = fwd_frame[bs_name]
+                    for bs_name in bwd_frame.keys():
+                        if bs_name not in merged_bs[frame]:
+                            merged_bs[frame][bs_name] = bwd_frame[bs_name]
+                elif fwd_frame:
+                    merged_bs[frame] = fwd_frame
+                elif bwd_frame:
+                    merged_bs[frame] = bwd_frame
+                    
         out_bs_path = output_json.replace('.json', '.blendshapes.json')
         if merged_bs:
             with open(out_bs_path, "w") as f:
-                json.dump(merged_bs, f, indent=4)
+                json.dump(merged_bs, f, indent=2)
         elif os.path.exists(out_bs_path):
             # Clean up old sidecar if no blendshapes are generated in this pass
             os.remove(out_bs_path)
@@ -2241,22 +2269,19 @@ def generate_blendshapes_driver_node(parent_node, json_path, width, height):
     _deselect_nodes_in_context(parent_group)
 
     base_name = f"Blendshapes_{parent_node.name()}"
-    node_name = _safe_nuke_node_name(base_name)
+    existing = nuke.toNode(base_name)
+    if existing:
+        nuke.delete(existing)
     
-    import sys
-    if plugin_dir not in sys.path:
-        sys.path.append(plugin_dir)
-    try:
-        from backend.blendshapes_config import ARKIT_BLENDSHAPE_NAMES
-    except ImportError:
-        nuke.message("Failed to load ARKIT_BLENDSHAPE_NAMES from backend.")
+    if not blendshapes_config:
+        nuke.message("Failed to load blendshapes_config from backend.")
         return False
 
     driver_node = _create_node_in_context(parent_group, 'NoOp')
-    driver_node.setName(node_name)
+    driver_node.setName(base_name)
     
     # Add label for Stage 3 discovery
-    driver_node['label'].setValue(f"Tracker: {parent_node.name()}\\nJSON: {json_path}")
+    driver_node['label'].setValue(f"Tracker: {parent_node.name()}\nJSON: {json_path}")
     
     # Create Tab
     tab = nuke.Tab_Knob("blendshapes", "Blendshapes")
@@ -2264,7 +2289,7 @@ def generate_blendshapes_driver_node(parent_node, json_path, width, height):
     
     # Create Knobs
     knobs = {}
-    for idx, name in enumerate(ARKIT_BLENDSHAPE_NAMES):
+    for idx, name in enumerate(blendshapes_config.ARKIT_BLENDSHAPE_NAMES):
         k = nuke.Double_Knob(name, name)
         k.setRange(0.0, 1.0)
         if idx == 0 and name == "_neutral":
