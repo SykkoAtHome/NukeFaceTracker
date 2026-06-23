@@ -705,10 +705,16 @@ def _build_gridwarp_tab(node):
     node.addKnob(other_intensity)
     
     blink_filter = nuke.Boolean_Knob("retarget_blink_filter", "Enable Blink Filter")
-    blink_filter.setValue(True)
+    blink_filter.setValue(False)
     blink_filter.setFlag(nuke.STARTLINE)
     blink_filter.setTooltip("Filters high-frequency jitter/shaking on eye and eyelid points when actor blinks.")
     node.addKnob(blink_filter)
+    
+    blink_threshold = nuke.Double_Knob("retarget_blink_threshold", "Blink Threshold")
+    blink_threshold.setValue(0.5)
+    blink_threshold.setRange(0.1, 1.0)
+    blink_threshold.setTooltip("Blendshape score threshold for eyeBlinkLeft/Right to trigger the blink filter.")
+    node.addKnob(blink_threshold)
     
     create_retarget_btn = nuke.PyScript_Knob("create_retarget_gridwarp_btn", "Export Retargeted GridWarp", "import nuke_tracker; nuke_tracker.generate_retargeted_gridwarp_node_from_panel(nuke.thisNode())")
     create_retarget_btn.setFlag(nuke.STARTLINE)
@@ -778,6 +784,7 @@ def update_retarget_ui_visibility(node):
         "retarget_mouth_intensity",
         "retarget_other_intensity",
         "retarget_blink_filter",
+        "retarget_blink_threshold",
         "create_retarget_gridwarp_btn"
     ]
     for name in retarget_knobs:
@@ -2464,9 +2471,9 @@ def generate_gridwarp_node(parent_node, json_path, width, height):
     return True
 
 
-def apply_blink_filter(animated_dest_frames, blendshape_frames):
+def apply_blink_filter(animated_dest_frames, blendshape_frames, blink_threshold=0.5):
     """
-    Applies the blink-filtering post-process. If eyeBlinkLeft/Right is > 0.5,
+    Applies the blink-filtering post-process. If eyeBlinkLeft/Right is > blink_threshold,
     freezes the positions of left/right eye points at the last non-blinking frame values.
     """
     left_eye_coords = {(2, 5), (2, 6), (2, 7), (3, 5), (3, 6), (3, 7)}
@@ -2493,7 +2500,7 @@ def apply_blink_filter(animated_dest_frames, blendshape_frames):
             
             # Left Eye
             if coord in left_eye_coords:
-                if blink_left > 0.5:
+                if blink_left > blink_threshold:
                     if last_non_blink_left is not None:
                         pt_copy["x"] = last_non_blink_left[coord][0]
                         pt_copy["y"] = last_non_blink_left[coord][1]
@@ -2504,7 +2511,7 @@ def apply_blink_filter(animated_dest_frames, blendshape_frames):
             
             # Right Eye
             elif coord in right_eye_coords:
-                if blink_right > 0.5:
+                if blink_right > blink_threshold:
                     if last_non_blink_right is not None:
                         pt_copy["x"] = last_non_blink_right[coord][0]
                         pt_copy["y"] = last_non_blink_right[coord][1]
@@ -2534,7 +2541,7 @@ def _build_retargeted_gridwarp_node_script(payload, animated_dest_frames, node_n
         "GridWarp3 {",
         " toolbar_visibility_src false",
         " source_grid_col   " + source_script.replace("\n", "\n "),
-        " source_grid_visible true",
+        " source_grid_visible false",
         " destination_grid_col   " + destination_script.replace("\n", "\n "),
         " destination_grid_visible true",
         " grids_manually_moved true",
@@ -2545,6 +2552,49 @@ def _build_retargeted_gridwarp_node_script(payload, animated_dest_frames, node_n
         "}",
         "",
     ])
+
+
+def interpolate_blendshapes(blendshape_frames, start_frame, end_frame):
+    """Linear interpolation of blendshape frames to fill in gaps and match [start_frame, end_frame]."""
+    sorted_existing = sorted([int(f) for f in blendshape_frames.keys() if str(f) in blendshape_frames])
+    if not sorted_existing:
+        return {}
+        
+    interpolated = {}
+    for f in range(start_frame, end_frame + 1):
+        f_str = str(f)
+        if f_str in blendshape_frames:
+            interpolated[f_str] = dict(blendshape_frames[f_str])
+        else:
+            lower_frames = [lf for lf in sorted_existing if lf < f]
+            higher_frames = [hf for hf in sorted_existing if hf > f]
+            
+            if not lower_frames:
+                # Constant extrapolation at the beginning
+                closest_f = str(sorted_existing[0])
+                interpolated[f_str] = dict(blendshape_frames[closest_f])
+            elif not higher_frames:
+                # Constant extrapolation at the end
+                closest_f = str(sorted_existing[-1])
+                interpolated[f_str] = dict(blendshape_frames[closest_f])
+            else:
+                # Linear interpolation between adjacent frames
+                f_prev = lower_frames[-1]
+                f_next = higher_frames[0]
+                scores_prev = blendshape_frames[str(f_prev)]
+                scores_next = blendshape_frames[str(f_next)]
+                
+                t = (f - f_prev) / float(f_next - f_prev)
+                
+                all_keys = set(scores_prev.keys()).union(scores_next.keys())
+                interp_scores = {}
+                for key in all_keys:
+                    val_prev = scores_prev.get(key, 0.0)
+                    val_next = scores_next.get(key, 0.0)
+                    interp_scores[key] = val_prev + t * (val_next - val_prev)
+                interpolated[f_str] = interp_scores
+                
+    return interpolated
 
 
 def generate_retargeted_gridwarp_node(parent_node, json_path, width, height):
@@ -2580,6 +2630,17 @@ def generate_retargeted_gridwarp_node(parent_node, json_path, width, height):
         end_frame = 100
         ref_frame = 1
         
+    # Warning if ref_frame is outside tracking range
+    if ref_frame < start_frame or ref_frame > end_frame:
+        ref_clamped = max(start_frame, min(end_frame, ref_frame))
+        nuke.message("Warning: Reference frame {} is outside the tracking range [{}, {}]. Clamped to {}.".format(ref_frame, start_frame, end_frame, ref_clamped))
+        
+    # Interpolate expression blendshapes to fill gaps and span the complete target frame range
+    blendshape_frames = interpolate_blendshapes(blendshape_frames, start_frame, end_frame)
+    if not blendshape_frames:
+        nuke.message("No active expression frames available inside range.")
+        return False
+
     payload, payload_err = _grid_payload_from_tracks(tracker_data, start_frame, end_frame, ref_frame)
     if payload_err:
         nuke.message(payload_err)
@@ -2593,7 +2654,15 @@ def generate_retargeted_gridwarp_node(parent_node, json_path, width, height):
         "other": float(parent_node['retarget_other_intensity'].value()),
     }
     enable_blink_filter = bool(parent_node['retarget_blink_filter'].value())
+    blink_threshold = float(parent_node['retarget_blink_threshold'].value()) if 'retarget_blink_threshold' in parent_node.knobs() else 0.5
     
+    # Warning if the reference frame falls on a frame where the actor is blinking
+    ref_scores = blendshape_frames.get(str(ref_frame), {})
+    ref_blink_left = ref_scores.get("eyeBlinkLeft", 0.0)
+    ref_blink_right = ref_scores.get("eyeBlinkRight", 0.0)
+    if ref_blink_left > blink_threshold or ref_blink_right > blink_threshold:
+        nuke.message("Warning: The reference frame has active eye blinking. This may cause the blink filter to lock the eyelids in a closed or semi-closed position.")
+        
     import backend.retarget as retarget
     animated_dest_frames = retarget.compute_destination_grid(
         grid_points_ref=payload["destination"],
@@ -2603,7 +2672,7 @@ def generate_retargeted_gridwarp_node(parent_node, json_path, width, height):
     )
     
     if enable_blink_filter:
-        animated_dest_frames = apply_blink_filter(animated_dest_frames, blendshape_frames)
+        animated_dest_frames = apply_blink_filter(animated_dest_frames, blendshape_frames, blink_threshold)
         
     parent_group = _get_parent_context(parent_node)
     _deselect_nodes_in_context(parent_group)

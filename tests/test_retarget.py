@@ -281,6 +281,70 @@ class TestExpressionRetargeting(unittest.TestCase):
         self.assertEqual(pt_f3["x"], left_eye_pt_ref["x"] + 10.0)
         self.assertEqual(pt_f3["y"], left_eye_pt_ref["y"] + 10.0)
 
+    def test_interpolate_blendshapes(self):
+        """Verify that interpolate_blendshapes correctly fills in missing frames using linear interpolation and constant extrapolation."""
+        blendshape_frames = {
+            "10": {"jawOpen": 0.2, "eyeBlinkLeft": 0.0},
+            "20": {"jawOpen": 0.8, "eyeBlinkLeft": 1.0}
+        }
+        
+        # We request range [5, 25]
+        interpolated = nuke_tracker.interpolate_blendshapes(blendshape_frames, start_frame=5, end_frame=25)
+        
+        # Checking constant boundary extrapolation at the beginning (frame 5)
+        self.assertIn("5", interpolated)
+        self.assertAlmostEqual(interpolated["5"]["jawOpen"], 0.2)
+        self.assertAlmostEqual(interpolated["5"]["eyeBlinkLeft"], 0.0)
+        
+        # Checking existing frame (frame 10)
+        self.assertIn("10", interpolated)
+        self.assertAlmostEqual(interpolated["10"]["jawOpen"], 0.2)
+        
+        # Checking linear interpolation (frame 15 is halfway between 10 and 20)
+        self.assertIn("15", interpolated)
+        self.assertAlmostEqual(interpolated["15"]["jawOpen"], 0.5) # 0.2 + 0.5 * (0.8 - 0.2)
+        self.assertAlmostEqual(interpolated["15"]["eyeBlinkLeft"], 0.5)
+        
+        # Checking constant boundary extrapolation at the end (frame 25)
+        self.assertIn("25", interpolated)
+        self.assertAlmostEqual(interpolated["25"]["jawOpen"], 0.8)
+        self.assertAlmostEqual(interpolated["25"]["eyeBlinkLeft"], 1.0)
+
+    def test_blink_filter_custom_threshold(self):
+        """Verify apply_blink_filter respects a custom threshold."""
+        animated_dest_frames = {
+            "1": [dict(p) for p in self.grid_points_ref],
+            "2": [dict(p) for p in self.grid_points_ref],
+            "3": [dict(p) for p in self.grid_points_ref]
+        }
+        
+        left_eye_pt_ref = next(p for p in self.grid_points_ref if p["row"] == 2 and p["col"] == 6)
+        
+        # Modify Left Eye points in Frame 2 and Frame 3 to simulate movement
+        for pt in animated_dest_frames["2"]:
+            if pt["row"] == 2 and pt["col"] == 6:
+                pt["x"] += 5.0
+        for pt in animated_dest_frames["3"]:
+            if pt["row"] == 2 and pt["col"] == 6:
+                pt["x"] += 10.0
+                
+        # Eyelid blendshapes: blink score is 0.3 on frame 2.
+        blendshape_frames = {
+            "1": {"eyeBlinkLeft": 0.0},
+            "2": {"eyeBlinkLeft": 0.3},
+            "3": {"eyeBlinkLeft": 0.0}
+        }
+        
+        # Case A: threshold 0.4 (no freeze on frame 2)
+        filtered_no_freeze = nuke_tracker.apply_blink_filter(animated_dest_frames, blendshape_frames, blink_threshold=0.4)
+        pt_f2_no = next(p for p in filtered_no_freeze["2"] if p["row"] == 2 and p["col"] == 6)
+        self.assertEqual(pt_f2_no["x"], left_eye_pt_ref["x"] + 5.0) # Not frozen
+        
+        # Case B: threshold 0.2 (freeze on frame 2)
+        filtered_freeze = nuke_tracker.apply_blink_filter(animated_dest_frames, blendshape_frames, blink_threshold=0.2)
+        pt_f2_yes = next(p for p in filtered_freeze["2"] if p["row"] == 2 and p["col"] == 6)
+        self.assertEqual(pt_f2_yes["x"], left_eye_pt_ref["x"]) # Frozen to frame 1's position
+
 
 if __name__ == "__main__":
     unittest.main()
