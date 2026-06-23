@@ -77,11 +77,12 @@ def find_upstream_read(node):
     return None
 
 
-def _resolve_output_json_path(node):
+def _resolve_output_json_path(node, target=None):
     """Pure resolver: returns the output JSON path for the node without mutating state."""
     # Check if we should write results to a custom file
     write_to_file = node['write_to_file'].value() if 'write_to_file' in node.knobs() else False
-    target = node['track_target'].value() if 'track_target' in node.knobs() else 'source'
+    if target is None:
+        target = node['track_target'].value() if 'track_target' in node.knobs() else 'source'
 
     if not write_to_file:
         # Default to a safe, stable path inside Nuke's native temp directory
@@ -671,6 +672,49 @@ def _build_gridwarp_tab(node):
     create_gridwarp_btn.setFlag(nuke.STARTLINE)
     node.addKnob(create_gridwarp_btn)
 
+    node.addKnob(nuke.Text_Knob("divider_retarget", "Expression Retargeting", ""))
+    
+    g_intensity = nuke.Double_Knob("retarget_global_intensity", "Global Intensity")
+    g_intensity.setValue(1.0)
+    g_intensity.setRange(0.0, 2.0)
+    g_intensity.setTooltip("Overall multiplier for expression retargeting strength.")
+    node.addKnob(g_intensity)
+    
+    brows_intensity = nuke.Double_Knob("retarget_brows_intensity", "Brows Intensity")
+    brows_intensity.setValue(1.0)
+    brows_intensity.setRange(0.0, 2.0)
+    brows_intensity.setTooltip("Expression strength multiplier for eyebrows region.")
+    node.addKnob(brows_intensity)
+    
+    eyes_intensity = nuke.Double_Knob("retarget_eyes_intensity", "Eyes Intensity")
+    eyes_intensity.setValue(1.0)
+    eyes_intensity.setRange(0.0, 2.0)
+    eyes_intensity.setTooltip("Expression strength multiplier for eyes/eyelids region.")
+    node.addKnob(eyes_intensity)
+    
+    mouth_intensity = nuke.Double_Knob("retarget_mouth_intensity", "Mouth Intensity")
+    mouth_intensity.setValue(1.0)
+    mouth_intensity.setRange(0.0, 2.0)
+    mouth_intensity.setTooltip("Expression strength multiplier for mouth/lips region.")
+    node.addKnob(mouth_intensity)
+    
+    other_intensity = nuke.Double_Knob("retarget_other_intensity", "Other Intensity")
+    other_intensity.setValue(1.0)
+    other_intensity.setRange(0.0, 2.0)
+    other_intensity.setTooltip("Expression strength multiplier for jaw, cheeks, nose regions.")
+    node.addKnob(other_intensity)
+    
+    blink_filter = nuke.Boolean_Knob("retarget_blink_filter", "Enable Blink Filter")
+    blink_filter.setValue(True)
+    blink_filter.setFlag(nuke.STARTLINE)
+    blink_filter.setTooltip("Filters high-frequency jitter/shaking on eye and eyelid points when actor blinks.")
+    node.addKnob(blink_filter)
+    
+    create_retarget_btn = nuke.PyScript_Knob("create_retarget_gridwarp_btn", "Export Retargeted GridWarp", "import nuke_tracker; nuke_tracker.generate_retargeted_gridwarp_node_from_panel(nuke.thisNode())")
+    create_retarget_btn.setFlag(nuke.STARTLINE)
+    create_retarget_btn.setTooltip("Export role-swapped, expression-retargeted GridWarp3 node using the expression target's blendshapes.")
+    node.addKnob(create_retarget_btn)
+
 
 def _build_blendshapes_tab(node):
     """Build the Blendshapes export tab."""
@@ -708,6 +752,37 @@ def update_track_target_visibility(node):
         
     # Always ensure the rest of the knobs' states are updated accordingly
     update_knob_visibility_on_target_change(node)
+
+
+def update_retarget_ui_visibility(node):
+    """Updates enablement (activation) of expression retargeting controls based on file existence.
+    
+    Keeping the function name for full backwards compatibility with existing saved nodes.
+    """
+    source_path = _resolve_output_json_path(node, target='source')
+    expr_path = _resolve_output_json_path(node, target='expression')
+    
+    has_source = source_path and os.path.exists(source_path)
+    has_expr = False
+    if expr_path:
+        expr_bs_path = expr_path.replace(".json", ".blendshapes.json")
+        has_expr = os.path.exists(expr_bs_path)
+        
+    has_both = has_source and has_expr
+    
+    retarget_knobs = [
+        "divider_retarget",
+        "retarget_global_intensity",
+        "retarget_brows_intensity",
+        "retarget_eyes_intensity",
+        "retarget_mouth_intensity",
+        "retarget_other_intensity",
+        "retarget_blink_filter",
+        "create_retarget_gridwarp_btn"
+    ]
+    for name in retarget_knobs:
+        if name in node.knobs():
+            node[name].setEnabled(has_both)
 
 
 def update_knob_visibility_on_target_change(node):
@@ -816,15 +891,22 @@ def _build_knob_changed_script():
         "    n['info_full_mesh'].setVisible(is_full)\n"
         "elif k.name() == 'write_to_file':\n"
         "    n['output_json'].setVisible(k.value())\n"
+        "    import nuke_tracker\n"
+        "    nuke_tracker.update_retarget_ui_visibility(n)\n"
         "elif k.name().startswith('roto_group_'):\n"
         "    import nuke_tracker\n"
         "    nuke_tracker.set_roto_group_selection(n, k.name(), k.value())\n"
         "elif k.name() in ('inputChange', 'showPanel'):\n"
         "    import nuke_tracker\n"
         "    nuke_tracker.update_track_target_visibility(n)\n"
+        "    nuke_tracker.update_retarget_ui_visibility(n)\n"
         "elif k.name() == 'track_target':\n"
         "    import nuke_tracker\n"
         "    nuke_tracker.update_knob_visibility_on_target_change(n)\n"
+        "    nuke_tracker.update_retarget_ui_visibility(n)\n"
+        "elif k.name() == 'output_json':\n"
+        "    import nuke_tracker\n"
+        "    nuke_tracker.update_retarget_ui_visibility(n)\n"
     )
 
 
@@ -2217,10 +2299,8 @@ def _gridwarp_animated_handle_script(frames_by_key, row, col, direction):
     return "{{1 {} {}}}".format(_gridwarp_curve(x_values), _gridwarp_curve(y_values))
 
 
-def _build_gridwarp_destination_script(payload):
-    rows = payload["rows"]
-    cols = payload["cols"]
-    points_by_position = _gridwarp_points_by_position(payload["destination"])
+def _build_gridwarp_static_grid_script(rows, cols, points):
+    points_by_position = _gridwarp_points_by_position(points)
     lines = [
         "{",
         f"  1 {cols} {rows} 4 1 0",
@@ -2242,12 +2322,10 @@ def _build_gridwarp_destination_script(payload):
     return "\n".join(lines)
 
 
-def _build_gridwarp_source_script(payload):
-    rows = payload["rows"]
-    cols = payload["cols"]
+def _build_gridwarp_animated_grid_script(rows, cols, frames):
     frames_by_key = {
         int(frame_key): _gridwarp_points_by_position(points)
-        for frame_key, points in payload["source"].items()
+        for frame_key, points in frames.items()
     }
     lines = [
         "{",
@@ -2273,6 +2351,14 @@ def _build_gridwarp_source_script(payload):
 
     lines.extend(["  }", "}"])
     return "\n".join(lines)
+
+
+def _build_gridwarp_destination_script(payload):
+    return _build_gridwarp_static_grid_script(payload["rows"], payload["cols"], payload["destination"])
+
+
+def _build_gridwarp_source_script(payload):
+    return _build_gridwarp_animated_grid_script(payload["rows"], payload["cols"], payload["source"])
 
 
 def _nuke_script_quote(value):
@@ -2373,6 +2459,168 @@ def generate_gridwarp_node(parent_node, json_path, width, height):
         nuke.message("Failed to create GridWarp node from generated script.")
         return False
 
+    parent_node.setSelected(True)
+    gridwarp.setSelected(True)
+    return True
+
+
+def apply_blink_filter(animated_dest_frames, blendshape_frames):
+    """
+    Applies the blink-filtering post-process. If eyeBlinkLeft/Right is > 0.5,
+    freezes the positions of left/right eye points at the last non-blinking frame values.
+    """
+    left_eye_coords = {(2, 5), (2, 6), (2, 7), (3, 5), (3, 6), (3, 7)}
+    right_eye_coords = {(2, 1), (2, 2), (2, 3), (3, 1), (3, 2), (3, 3)}
+    
+    sorted_frames = sorted(animated_dest_frames.keys(), key=lambda f: int(f))
+    
+    last_non_blink_left = None
+    last_non_blink_right = None
+    
+    filtered_frames = {}
+    
+    for frame_key in sorted_frames:
+        pts = animated_dest_frames[frame_key]
+        scores = blendshape_frames.get(frame_key, {})
+        
+        blink_left = scores.get("eyeBlinkLeft", 0.0)
+        blink_right = scores.get("eyeBlinkRight", 0.0)
+        
+        new_pts = []
+        for pt in pts:
+            coord = (pt["row"], pt["col"])
+            pt_copy = dict(pt)
+            
+            # Left Eye
+            if coord in left_eye_coords:
+                if blink_left > 0.5:
+                    if last_non_blink_left is not None:
+                        pt_copy["x"] = last_non_blink_left[coord][0]
+                        pt_copy["y"] = last_non_blink_left[coord][1]
+                else:
+                    if last_non_blink_left is None:
+                        last_non_blink_left = {}
+                    last_non_blink_left[coord] = (pt["x"], pt["y"])
+            
+            # Right Eye
+            elif coord in right_eye_coords:
+                if blink_right > 0.5:
+                    if last_non_blink_right is not None:
+                        pt_copy["x"] = last_non_blink_right[coord][0]
+                        pt_copy["y"] = last_non_blink_right[coord][1]
+                else:
+                    if last_non_blink_right is None:
+                        last_non_blink_right = {}
+                    last_non_blink_right[coord] = (pt["x"], pt["y"])
+                    
+            new_pts.append(pt_copy)
+            
+        filtered_frames[frame_key] = new_pts
+        
+    return filtered_frames
+
+
+def _build_retargeted_gridwarp_node_script(payload, animated_dest_frames, node_name):
+    center_x = sum(point["x"] for point in payload["destination"]) / len(payload["destination"])
+    center_y = sum(point["y"] for point in payload["destination"]) / len(payload["destination"])
+    label = "Ref Frame: {}\n{} x {} FaceTracker Retargeted grid".format(
+        payload["reference_frame"], payload["cols"], payload["rows"]
+    )
+    # Source is static (neutral face)
+    source_script = _build_gridwarp_static_grid_script(payload["rows"], payload["cols"], payload["destination"])
+    # Destination is animated (deformed face)
+    destination_script = _build_gridwarp_animated_grid_script(payload["rows"], payload["cols"], animated_dest_frames)
+    return "\n".join([
+        "GridWarp3 {",
+        " toolbar_visibility_src false",
+        " source_grid_col   " + source_script.replace("\n", "\n "),
+        " source_grid_visible true",
+        " destination_grid_col   " + destination_script.replace("\n", "\n "),
+        " destination_grid_visible true",
+        " grids_manually_moved true",
+        " source_grid_transform_center {{{} {}}}".format(_gridwarp_number(center_x), _gridwarp_number(center_y)),
+        " destination_grid_transform_center {{{} {}}}".format(_gridwarp_number(center_x), _gridwarp_number(center_y)),
+        " name " + _safe_nuke_node_name(node_name),
+        " label " + _nuke_script_quote(label),
+        "}",
+        "",
+    ])
+
+
+def generate_retargeted_gridwarp_node(parent_node, json_path, width, height):
+    """Build a role-swapped, expression-retargeted GridWarp3 node."""
+    source_path = _resolve_output_json_path(parent_node, target='source')
+    expr_path = _resolve_output_json_path(parent_node, target='expression')
+    
+    if not source_path or not os.path.exists(source_path):
+        nuke.message("Source tracking data is missing. Please track 'source' target first.")
+        return False
+        
+    expr_bs_path = expr_path.replace(".json", ".blendshapes.json") if expr_path else None
+    if not expr_bs_path or not os.path.exists(expr_bs_path):
+        nuke.message("Expression blendshapes data is missing. Please track 'expression' target first.")
+        return False
+        
+    tracker_data, err = _load_tracker_json(source_path)
+    if err is not None:
+        nuke.message(err)
+        return False
+        
+    blendshape_frames = _load_blendshapes(expr_path)
+    if not blendshape_frames:
+        nuke.message("Failed to load expression blendshapes data.")
+        return False
+        
+    try:
+        start_frame = int(parent_node['start_frame'].value())
+        end_frame = int(parent_node['end_frame'].value())
+        ref_frame = int(parent_node['grid_ref_frame'].value())
+    except Exception:
+        start_frame = 1
+        end_frame = 100
+        ref_frame = 1
+        
+    payload, payload_err = _grid_payload_from_tracks(tracker_data, start_frame, end_frame, ref_frame)
+    if payload_err:
+        nuke.message(payload_err)
+        return False
+        
+    global_intensity = float(parent_node['retarget_global_intensity'].value())
+    zone_intensities = {
+        "brows": float(parent_node['retarget_brows_intensity'].value()),
+        "eyes": float(parent_node['retarget_eyes_intensity'].value()),
+        "mouth": float(parent_node['retarget_mouth_intensity'].value()),
+        "other": float(parent_node['retarget_other_intensity'].value()),
+    }
+    enable_blink_filter = bool(parent_node['retarget_blink_filter'].value())
+    
+    import backend.retarget as retarget
+    animated_dest_frames = retarget.compute_destination_grid(
+        grid_points_ref=payload["destination"],
+        blendshape_frames=blendshape_frames,
+        global_intensity=global_intensity,
+        zone_intensities=zone_intensities
+    )
+    
+    if enable_blink_filter:
+        animated_dest_frames = apply_blink_filter(animated_dest_frames, blendshape_frames)
+        
+    parent_group = _get_parent_context(parent_node)
+    _deselect_nodes_in_context(parent_group)
+    parent_node.setSelected(True)
+    
+    node_name = f"GridWarp_Retarget_{parent_node.name()}"
+    node_script = _build_retargeted_gridwarp_node_script(payload, animated_dest_frames, node_name)
+    try:
+        gridwarp = _paste_node_script_in_context(parent_group, node_script)
+    except Exception as e:
+        nuke.message(f"Failed to create GridWarp node from generated script:\n{str(e)}")
+        return False
+        
+    if gridwarp is None:
+        nuke.message("Failed to create GridWarp node from generated script.")
+        return False
+        
     parent_node.setSelected(True)
     gridwarp.setSelected(True)
     return True
@@ -3161,6 +3409,11 @@ def generate_cornerpin_node_from_panel(node):
 def generate_gridwarp_node_from_panel(node):
     """Callback triggered from the GridWarp tab. Loads JSON and builds the GridWarp node."""
     return _export_from_panel(node, generate_gridwarp_node)
+
+
+def generate_retargeted_gridwarp_node_from_panel(node):
+    """Callback triggered from the 'Export Retargeted GridWarp' button."""
+    return _export_from_panel(node, generate_retargeted_gridwarp_node)
 
 
 def generate_blendshapes_driver_from_panel(node):
