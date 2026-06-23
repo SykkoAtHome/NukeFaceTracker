@@ -75,11 +75,14 @@ def _resolve_output_json_path(node):
 
     if not write_to_file:
         # Default to a safe, stable path inside Nuke's native temp directory
-        try:
-            temp_dir = nuke.temp_dir()
-        except Exception:
-            temp_dir = tempfile.gettempdir()
-        return os.path.join(temp_dir, f"facetracker_{node.name()}_data.json").replace("\\", "/")
+        nuke_temp = os.environ.get('NUKE_TEMP_DIR')
+        if nuke_temp:
+            temp_dir = nuke_temp
+        else:
+            temp_dir = os.path.join(tempfile.gettempdir(), "nuke")
+            
+        temp_dir = os.path.join(temp_dir, "facetracker").replace("\\", "/")
+        return os.path.join(temp_dir, f"{node.name()}_data.json").replace("\\", "/")
 
     current_val = node['output_json'].value()
     if not current_val or "temp_tracker_data" in current_val:
@@ -616,6 +619,26 @@ def _build_gridwarp_tab(node):
     node.addKnob(create_gridwarp_btn)
 
 
+def _build_blendshapes_tab(node):
+    """Build the Blendshapes export tab."""
+    blendshapes_tab = nuke.Tab_Knob("blendshapes_tab", "Blendshapes")
+    node.addKnob(blendshapes_tab)
+
+    node.addKnob(nuke.Text_Knob("divider_blendshapes", "Blendshapes Export Settings", ""))
+
+    create_blendshapes_btn = nuke.PyScript_Knob("create_blendshapes_btn", "Export Blendshapes Driver", "import nuke_tracker; nuke_tracker.generate_blendshapes_driver_from_panel(nuke.thisNode())")
+    create_blendshapes_btn.setFlag(nuke.STARTLINE)
+    node.addKnob(create_blendshapes_btn)
+    
+    # Disable button if sidecar doesn't exist
+    json_path = _resolve_output_json_path(node)
+    if json_path:
+        blendshapes_data = _load_blendshapes(json_path)
+        if not blendshapes_data:
+            create_blendshapes_btn.setFlag(nuke.DISABLED)
+            create_blendshapes_btn.setTooltip("Blendshapes data not found. Please re-run Track Face to generate it.")
+
+
 def _capture_knob_values(node, names):
     """Return a dict of current values for the named knobs, ignoring any errors."""
     values = {}
@@ -678,6 +701,7 @@ def _rebuild_dynamic_tabs(node):
     _build_roto_tab(node)
     _build_cornerpin_tab(node)
     _build_gridwarp_tab(node)
+    _build_blendshapes_tab(node)
     _build_settings_tab(node)
     _restore_knob_values(node, captured)
 
@@ -737,6 +761,7 @@ def create_face_tracker_node():
     _build_roto_tab(node)
     _build_cornerpin_tab(node)
     _build_gridwarp_tab(node)
+    _build_blendshapes_tab(node)
     _build_settings_tab(node)
 
     # Dynamic visibility callback script set on the knobChanged callback
@@ -1093,6 +1118,27 @@ def _merge_backtrack_passes(output_fwd, output_bwd, output_json, task):
         os.makedirs(os.path.dirname(output_json), exist_ok=True)
         with open(output_json, "w") as f:
             json.dump(merged_data, f, indent=2)
+            
+        # Also merge and write blendshapes sidecar if present
+        fwd_bs_path = output_fwd.replace('.json', '.blendshapes.json')
+        bwd_bs_path = output_bwd.replace('.json', '.blendshapes.json')
+        merged_bs = {}
+        
+        if os.path.exists(bwd_bs_path):
+            with open(bwd_bs_path, "r") as f:
+                merged_bs.update(json.load(f))
+        if os.path.exists(fwd_bs_path):
+            with open(fwd_bs_path, "r") as f:
+                merged_bs.update(json.load(f))
+                
+        out_bs_path = output_json.replace('.json', '.blendshapes.json')
+        if merged_bs:
+            with open(out_bs_path, "w") as f:
+                json.dump(merged_bs, f, indent=4)
+        elif os.path.exists(out_bs_path):
+            # Clean up old sidecar if no blendshapes are generated in this pass
+            os.remove(out_bs_path)
+            
     except Exception as e:
         nuke.message(f"Failed to save merged tracking JSON:\n{str(e)}")
         return False
@@ -1119,10 +1165,9 @@ def run_tracking_on_node(node):
 
     # 4. Set up temporary render directory for active image stream caching.
     # Dynamically query Nuke's native temp directory to respect custom fast scratch disks.
-    try:
-        nuke_temp = nuke.temp_dir()
-    except Exception:
-        nuke_temp = None
+    nuke_temp = os.environ.get('NUKE_TEMP_DIR')
+    if not nuke_temp:
+        nuke_temp = os.path.join(tempfile.gettempdir(), "nuke")
 
     import time
     timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -1144,6 +1189,16 @@ def run_tracking_on_node(node):
     output_bwd = None
     write_node = None
     success = False
+
+    # Clear old tracking data so we don't load stale data if tracking fails
+    try:
+        if os.path.exists(output_json):
+            os.remove(output_json)
+        bs_path = output_json.replace('.json', '.blendshapes.json')
+        if os.path.exists(bs_path):
+            os.remove(bs_path)
+    except Exception as e:
+        pass
 
     try:
         write_node = _render_input_stream(node, start_frame, end_frame, temp_file_pattern)
@@ -1239,6 +1294,21 @@ def run_tracking_on_node(node):
 
     # 6. Success message - printed to the script editor to avoid blocking modal dialogs
     print("[NukeFaceTracker] Face tracking completed successfully! Switch to 'Tracker' or 'Roto' tab to export.")
+
+    # Refresh blendshapes button state
+    try:
+        bs_btn = node.knob('create_blendshapes_btn')
+        if bs_btn:
+            bs_path = output_json.replace('.json', '.blendshapes.json')
+            if os.path.exists(bs_path):
+                bs_btn.clearFlag(nuke.DISABLED)
+                bs_btn.setTooltip("")
+            else:
+                bs_btn.setFlag(nuke.DISABLED)
+                bs_btn.setTooltip("Blendshapes data not found. Please re-run Track Face to generate it.")
+    except Exception:
+        pass
+
     return True
 
 
@@ -1708,6 +1778,24 @@ def _load_tracker_json(json_path):
         return None, f"Failed to parse JSON file:\n{str(e)}"
 
 
+def _load_blendshapes(json_path):
+    """Load blendshapes from the sidecar JSON file if it exists.
+    
+    Returns an empty dict if the file is missing or invalid, ensuring
+    backward compatibility with old tracking data.
+    """
+    if not json_path:
+        return {}
+    blendshapes_path = json_path.replace(".json", ".blendshapes.json")
+    if not os.path.exists(blendshapes_path):
+        return {}
+    try:
+        with open(blendshapes_path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
 def _is_root_context(context):
     try:
         if context is nuke.root():
@@ -2139,6 +2227,61 @@ def generate_gridwarp_node(parent_node, json_path, width, height):
 
     parent_node.setSelected(True)
     gridwarp.setSelected(True)
+    return True
+
+
+def generate_blendshapes_driver_node(parent_node, json_path, width, height):
+    """Builds a NoOp node with animated blendshape sliders from the sidecar JSON."""
+    blendshapes_data = _load_blendshapes(json_path)
+    if not blendshapes_data:
+        nuke.message("No blendshapes data found for this tracking pass.")
+        return False
+
+    parent_group = _get_parent_context(parent_node)
+    _deselect_nodes_in_context(parent_group)
+
+    base_name = f"Blendshapes_{parent_node.name()}"
+    node_name = _safe_nuke_node_name(base_name)
+    
+    import sys
+    if plugin_dir not in sys.path:
+        sys.path.append(plugin_dir)
+    try:
+        from backend.blendshapes_config import ARKIT_BLENDSHAPE_NAMES
+    except ImportError:
+        nuke.message("Failed to load ARKIT_BLENDSHAPE_NAMES from backend.")
+        return False
+
+    driver_node = _create_node_in_context(parent_group, 'NoOp')
+    driver_node.setName(node_name)
+    
+    # Add label for Stage 3 discovery
+    driver_node['label'].setValue(f"Tracker: {parent_node.name()}\\nJSON: {json_path}")
+    
+    # Create Tab
+    tab = nuke.Tab_Knob("blendshapes", "Blendshapes")
+    driver_node.addKnob(tab)
+    
+    # Create Knobs
+    knobs = {}
+    for idx, name in enumerate(ARKIT_BLENDSHAPE_NAMES):
+        k = nuke.Double_Knob(name, name)
+        k.setRange(0.0, 1.0)
+        if idx == 0 and name == "_neutral":
+            k.setFlag(nuke.INVISIBLE)
+        driver_node.addKnob(k)
+        k.setAnimated()
+        knobs[name] = k
+    
+    # Populate keyframes
+    for frame_str, frame_bs in blendshapes_data.items():
+        frame_num = int(frame_str)
+        for name, score in frame_bs.items():
+            if name in knobs:
+                knobs[name].setValueAt(round(score, 4), frame_num)
+    
+    parent_node.setSelected(True)
+    driver_node.setSelected(True)
     return True
 
 
@@ -2871,6 +3014,11 @@ def generate_cornerpin_node_from_panel(node):
 def generate_gridwarp_node_from_panel(node):
     """Callback triggered from the GridWarp tab. Loads JSON and builds the GridWarp node."""
     return _export_from_panel(node, generate_gridwarp_node)
+
+
+def generate_blendshapes_driver_from_panel(node):
+    """Callback triggered from the Blendshapes tab. Loads sidecar JSON and builds the Blendshapes NoOp node."""
+    return _export_from_panel(node, generate_blendshapes_driver_node)
 
 
 def set_ref_frame_to_current(node):

@@ -85,6 +85,7 @@ def run_tracking_pass(frame_sequence, options, args, is_sequence, width, height,
                 raise RuntimeError(f"Failed to open video file: {args.input}")
 
         pass_results = {}
+        blendshapes_data = {}
         for group_name in contours_to_track.keys():
             pass_results[group_name] = {}
         for name in landmarks_to_track.keys():
@@ -144,6 +145,13 @@ def run_tracking_pass(frame_sequence, options, args, is_sequence, width, height,
                 if detection_result.face_landmarks:
                     landmarks = detection_result.face_landmarks[0]
 
+                    if hasattr(detection_result, 'face_blendshapes') and detection_result.face_blendshapes:
+                        frame_bs = {
+                            cat.category_name: round(cat.score, 4)
+                            for cat in detection_result.face_blendshapes[0]
+                        }
+                        blendshapes_data[str(frame_num)] = frame_bs
+
                     # Fetch coordinates for each contour group sequentially
                     for group_name, indices in contours_to_track.items():
                         points = []
@@ -175,7 +183,7 @@ def run_tracking_pass(frame_sequence, options, args, is_sequence, width, height,
             sys.stdout.write(f"PROGRESS: {progress}%\n")
             sys.stdout.flush()
 
-        return pass_results, width, height
+        return pass_results, blendshapes_data, width, height
     finally:
         # Always release detector and cap, even on early failure. Each is
         # guarded so an error in one does not mask the other.
@@ -258,7 +266,7 @@ def main():
             running_mode=run_mode,
             min_face_detection_confidence=args.min_det_confidence,
             min_tracking_confidence=args.min_track_confidence,
-            output_face_blendshapes=False,
+            output_face_blendshapes=True,  # WARNING: Do NOT add Delegate.GPU here. MediaPipe bug #5576 breaks blendshapes on GPU.
             output_facial_transformation_matrixes=False,
             num_faces=1
         )
@@ -288,7 +296,7 @@ def main():
 
         # Run tracking pass
         total_progress_frames = len(frame_sequence)
-        results_data, width, height = run_tracking_pass(
+        results_data, blendshapes_data, width, height = run_tracking_pass(
             frame_sequence, options, args, is_sequence, width, height, fps,
             contours_to_track, landmarks_to_track, run_mode, total_progress_frames, 0
         )
@@ -299,6 +307,13 @@ def main():
             os.makedirs(out_dir, exist_ok=True)
             with open(args.output, "w") as f:
                 json.dump(results_data, f, indent=2)
+            
+            # Serialize blendshapes to sidecar JSON if any
+            if blendshapes_data:
+                blendshapes_path = args.output.replace(".json", ".blendshapes.json")
+                with open(blendshapes_path, "w") as f:
+                    json.dump(blendshapes_data, f, indent=4)
+                    
             print(f"[SUCCESS] Tracking data successfully saved to: {args.output}")
         except Exception as e:
             print(f"[ERROR] Failed to save JSON output: {e}")
